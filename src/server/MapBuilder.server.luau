@@ -99,6 +99,13 @@ if not Lighting:FindFirstChildOfClass("Atmosphere") then
 	atmosphere.Haze = 1
 	atmosphere.Parent = Lighting
 end
+if not Lighting:FindFirstChildOfClass("BloomEffect") then
+	local bloom = Instance.new("BloomEffect") -- makes Neon parts glow
+	bloom.Intensity = 0.8
+	bloom.Size = 28
+	bloom.Threshold = 1.6
+	bloom.Parent = Lighting
+end
 if not Lighting:FindFirstChildOfClass("ColorCorrectionEffect") then
 	local colors = Instance.new("ColorCorrectionEffect")
 	colors.Saturation = 0.12
@@ -1007,12 +1014,13 @@ bench(pondCenter + Vector3.new(-24, 0, 0), pondCenter)
 bench(pondCenter + Vector3.new(24, 0, 0), pondCenter)
 
 --------------------------------------------------------------------------------
--- Egg Hatchery (front-left of the spawn): one egg on a stand for each egg in Config
+-- Egg Hatchery (front-left of the spawn): a glowing egg floating over a base for
+-- each egg in Config, with a sign on each base
 --------------------------------------------------------------------------------
 
 local hatchery = group("EggHatchery")
 local hatcheryBase = CFrame.lookAt(hatcheryCenter, PLAZA_CENTER) -- its front (-Z) faces the plaza
-local bobbingEggs: { BasePart } = {}
+local bobbingEggs: { { BasePart } } = {} -- each egg with its glowing shell, so they bob together
 
 pillar(hatchery, hatcheryCenter - Vector3.new(0, 0.2, 0), 0.6, 38, STONE, Enum.Material.Slate)
 pillar(hatchery, hatcheryCenter - Vector3.new(0, 0.2, 0), 0.7, 35, Color3.fromRGB(235, 225, 205), Enum.Material.Pavement)
@@ -1020,28 +1028,57 @@ pillar(hatchery, hatcheryCenter - Vector3.new(0, 0.2, 0), 0.7, 35, Color3.fromRG
 for i, egg in Config.Eggs do
 	-- Right to left in the stand's own view, so players walking up read them left to right.
 	local spot = hatcheryBase * CFrame.new(((#Config.Eggs + 1) / 2 - i) * 7.5, 0.5, 2)
-	local stand = block(hatchery, spot * CFrame.new(0, 1.5, 0), Vector3.new(5, 3, 5), MARBLE, Enum.Material.Marble)
-	stand.Name = egg.Name .. " Stand"
-	block(hatchery, spot * CFrame.new(0, 3.2, 0), Vector3.new(5.4, 0.4, 5.4), egg.Color, Enum.Material.Neon)
+	local glow = egg.Color:Lerp(WHITE, 0.25)
 
-	-- A plain egg that glows its color. A sphere mesh stretches to fill the part,
-	-- so a tall part makes an egg shape.
-	local eggPart = part({
-		Name = egg.Name,
-		Size = Vector3.new(3.4, 4.4, 3.4),
-		CFrame = spot * CFrame.new(0, 5.6, 0),
-		Color = egg.Color,
-		Material = Enum.Material.Neon,
-		Parent = hatchery,
-	})
-	local mesh = Instance.new("SpecialMesh")
-	mesh.MeshType = Enum.MeshType.Sphere
-	mesh.Parent = eggPart
-	addLight(eggPart, egg.Color, 14, 2)
+	-- The round base, with a glowing ring and a glowing top.
+	local base = pillar(hatchery, spot.Position, 2.5, 5.5, MARBLE, Enum.Material.Marble)
+	base.Name = egg.Name .. " Base"
+	pillar(hatchery, spot.Position + Vector3.new(0, 0.9, 0), 0.4, 5.7, egg.Color, Enum.Material.Neon)
+	pillar(hatchery, spot.Position + Vector3.new(0, 2.5, 0), 0.12, 4.2, egg.Color, Enum.Material.Neon)
 
-	actionPrompt(stand, "Hatch", ("%s (%s coins)"):format(egg.Name, Format.number(egg.Price)), "Egg", egg.Name)
-	floatingLabel(stand, ("%s\n💰 %s"):format(egg.Name, Format.number(egg.Price)), egg.Color:Lerp(WHITE, 0.3), 9.5)
-	table.insert(bobbingEggs, eggPart)
+	-- The sign on the front of the base, under the egg.
+	local sign = block(hatchery, spot * CFrame.new(0, 1.35, -2.9), Vector3.new(4.8, 2.1, 0.25), Color3.fromRGB(30, 32, 40), Enum.Material.SmoothPlastic)
+	sign.Name = egg.Name .. " Sign"
+	surfaceText(sign, Enum.NormalId.Front, ("%s\n💰 %s"):format(egg.Name, Format.number(egg.Price)), glow)
+	actionPrompt(base, "Hatch", ("%s (%s coins)"):format(egg.Name, Format.number(egg.Price)), "Egg", egg.Name)
+
+	-- The egg floats above the base on a beam of light. A sphere mesh stretches
+	-- to fill its part, so a tall part makes an egg shape.
+	local eggCenter = spot * CFrame.new(0, 7.2, 0)
+	local function eggShape(name: string, size: Vector3, transparency: number): Part
+		local shape = decor(part({
+			Name = name,
+			Size = size,
+			CFrame = eggCenter,
+			Color = egg.Color,
+			Material = Enum.Material.Neon,
+			Transparency = transparency,
+			Parent = hatchery,
+		}))
+		local mesh = Instance.new("SpecialMesh")
+		mesh.MeshType = Enum.MeshType.Sphere
+		mesh.Parent = shape
+		return shape
+	end
+	local eggPart = eggShape(egg.Name, Vector3.new(3.4, 4.4, 3.4), 0)
+	local shell = eggShape(egg.Name .. " Glow", Vector3.new(4.4, 5.6, 4.4), 0.75) -- a soft glow around the egg
+	addLight(eggPart, glow, 22, 4)
+
+	local beam = decor(pillar(hatchery, spot.Position + Vector3.new(0, 2.5, 0), 3, 1.4, egg.Color, Enum.Material.Neon))
+	beam.Transparency = 0.6
+
+	-- Little sparkles drifting off the egg.
+	local sparkles = Instance.new("ParticleEmitter")
+	sparkles.Color = ColorSequence.new(glow)
+	sparkles.LightEmission = 1
+	sparkles.Size = NumberSequence.new(0.5, 0)
+	sparkles.Lifetime = NumberRange.new(1, 1.6)
+	sparkles.Rate = 8
+	sparkles.Speed = NumberRange.new(1, 2.5)
+	sparkles.SpreadAngle = Vector2.new(180, 180)
+	sparkles.Parent = eggPart
+
+	table.insert(bobbingEggs, { eggPart, shell })
 end
 
 -- The sign behind the eggs.
@@ -1051,7 +1088,7 @@ for _, side in { -1, 1 } do
 end
 block(hatchery, hatcherySign * CFrame.new(0, 16.4, 0), Vector3.new(34, 1.2, 2), WOOD_DARK, Enum.Material.Wood)
 local hatcheryBoard = block(hatchery, hatcherySign * CFrame.new(0, 13, 0), Vector3.new(30, 5.5, 1.2), Color3.fromRGB(250, 240, 215), Enum.Material.WoodPlanks)
-surfaceText(hatcheryBoard, Enum.NormalId.Front, "🥚 EGG HATCHERY 🥚", Color3.fromRGB(255, 150, 50))
+surfaceText(hatcheryBoard, Enum.NormalId.Front, "🐾 PETS 🐾", Color3.fromRGB(255, 150, 50))
 
 --------------------------------------------------------------------------------
 -- Sewer entrance (front-right of the spawn): a glowing manhole with pipes
@@ -1543,14 +1580,15 @@ end
 map.Parent = workspace
 
 -- The eggs gently bob up and down, each a little after the last.
-for i, egg in bobbingEggs do
-	local bob = TweenService:Create(
-		egg,
-		TweenInfo.new(1.4, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
-		{ CFrame = egg.CFrame + Vector3.new(0, 0.6, 0) }
-	)
+for i, eggParts in bobbingEggs do
 	task.delay(i * 0.35, function()
-		bob:Play()
+		for _, eggPart in eggParts do
+			TweenService:Create(
+				eggPart,
+				TweenInfo.new(1.4, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+				{ CFrame = eggPart.CFrame + Vector3.new(0, 0.8, 0) }
+			):Play()
+		end
 	end)
 end
 

@@ -805,7 +805,7 @@ local petsList = make("ScrollingFrame", {
 local noPetsText = textLabel({
 	Position = UDim2.fromOffset(16, 150),
 	Size = UDim2.new(1, -32, 0, 60),
-	Text = "No pets yet! Hatch eggs at the 🥚 Egg Hatchery.",
+	Text = "No pets yet! Hatch eggs at the 🐾 PETS sign, front-left of spawn.",
 	TextColor3 = SOFT_WHITE,
 	Parent = petsWindow,
 })
