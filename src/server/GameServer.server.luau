@@ -332,12 +332,17 @@ local function sell(player: Player)
 	notify(player, ("Sold %s Flushes for %s coins!"):format(Format.number(sold), Format.number(earned)), true)
 end
 
--- Uses a part named "SellPad" if you've built one in Workspace, otherwise makes a simple one.
+-- Uses a part named "SellPad" anywhere in Workspace (the map has one), otherwise makes a simple one.
 local function getSellPad(): BasePart
-	local existing = workspace:FindFirstChild("SellPad")
-	if existing and existing:IsA("BasePart") then
-		return existing
-	end
+	-- MapBuilder might still be building the map when this script starts, so wait a few seconds.
+	local deadline = os.clock() + 3
+	repeat
+		local existing = workspace:FindFirstChild("SellPad", true)
+		if existing and existing:IsA("BasePart") then
+			return existing
+		end
+		task.wait(0.2)
+	until os.clock() > deadline
 
 	local pad = Instance.new("Part")
 	pad.Name = "SellPad"
@@ -367,12 +372,15 @@ local function getSellPad(): BasePart
 	return pad
 end
 
-getSellPad().Touched:Connect(function(hit)
-	local character = hit:FindFirstAncestorOfClass("Model")
-	local player = character and Players:GetPlayerFromCharacter(character)
-	if player then
-		sell(player)
-	end
+-- In its own thread so waiting for the map doesn't hold up players joining.
+task.spawn(function()
+	getSellPad().Touched:Connect(function(hit)
+		local character = hit:FindFirstAncestorOfClass("Model")
+		local player = character and Players:GetPlayerFromCharacter(character)
+		if player then
+			sell(player)
+		end
+	end)
 end)
 
 --------------------------------------------------------------------------------

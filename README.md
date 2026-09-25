@@ -16,9 +16,10 @@ Progress saves automatically.
 | `src/shared/Config.luau` | All the game's numbers: prices, upgrades, rebirth cost | **ModuleScript** named `Config` in `ReplicatedStorage > Shared` |
 | `src/shared/Format.luau` | Turns `1500` into `1.5K` | **ModuleScript** named `Format` in `ReplicatedStorage > Shared` |
 | `src/server/GameServer.server.luau` | Saving, clicking, selling, shop, rebirths | **Script** named `GameServer` in `ServerScriptService` |
+| `src/server/MapBuilder.server.luau` | Builds the bathroom map | **Script** named `MapBuilder` in `ServerScriptService` |
 | `src/client/GameClient.client.luau` | The on-screen UI | **LocalScript** named `GameClient` in `StarterPlayer > StarterPlayerScripts` |
 
-The scripts build everything else themselves: the plunger tool, the sell pad and all the UI.
+The scripts build everything else themselves: the plunger tool, the map and all the UI.
 
 ## Getting it into Roblox Studio
 
@@ -28,6 +29,7 @@ The scripts build everything else themselves: the plunger tool, the sell pad and
 2. In the Explorer, right-click **ReplicatedStorage** → Insert Object → **Folder**. Name it `Shared`.
 3. Inside `Shared`, insert two **ModuleScripts** named `Config` and `Format`. Paste in the matching files.
 4. In **ServerScriptService**, insert a **Script** named `GameServer`. Paste in `GameServer.server.luau`.
+   Add a second **Script** named `MapBuilder` there too, and paste in `MapBuilder.server.luau`.
 5. In **StarterPlayer > StarterPlayerScripts**, insert a **LocalScript** named `GameClient`. Paste in `GameClient.client.luau`.
 6. Press **Play**.
 
@@ -55,7 +57,9 @@ Without these, the game still works, it just won't remember progress.
 ## Customizing
 
 - **Prices, upgrades, rebirths:** edit `src/shared/Config.luau`. To add a new plunger or tank, add a line to the list and the shop shows it automatically.
-- **Sell pad:** by default a green pad appears 25 studs in front of spawn. To use your own, put a Part named `SellPad` in Workspace and the script uses that instead.
+- **The map:** MapBuilder builds a giant bathroom each time the game starts: a sell drain in front of spawn, the Plunger Shop on the left, the Rebirth toilet on the right, plus bobbing skibidi toilets, toilet paper towers, a bathtub, a sink and more. Walk up to the shop counter or the rebirth toilet and press **E** to open that menu.
+- **Editing the map by hand:** press **Play**, find `Map` in Workspace in the Explorer, right-click it and choose **Copy**. Press **Stop**, then right-click **Workspace** and choose **Paste Into**. Now the map is saved in your place and you can move things around. MapBuilder skips building when a `Map` is already there.
+- **Sell pad:** GameServer sells Flushes when a player touches any part named `SellPad`. The map has one; without the map, a plain green pad appears in front of spawn.
 - **Starting over:** change `Config.DataStoreName` to wipe everyone's progress (handy while testing).
 
 ## Ideas for what to add next

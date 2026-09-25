@@ -6,6 +6,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
+local ProximityPromptService = game:GetService("ProximityPromptService")
 
 local player = Players.LocalPlayer
 
@@ -348,6 +349,12 @@ local function toggleWindow(window: Frame)
 	window.Visible = open
 end
 
+local function openWindow(window: Frame)
+	for _, other in windows do
+		other.Visible = other == window
+	end
+end
+
 --------------------------------------------------------------------------------
 -- Shop
 --------------------------------------------------------------------------------
@@ -561,6 +568,15 @@ shopButton.Activated:Connect(function()
 end)
 rebirthButton.Activated:Connect(function()
 	toggleWindow(rebirthWindow)
+end)
+
+-- The map's shop counter and rebirth toilet have "Press E" prompts that open these menus.
+local menusByName = { Shop = shopWindow, Rebirth = rebirthWindow }
+ProximityPromptService.PromptTriggered:Connect(function(prompt)
+	local window = menusByName[prompt:GetAttribute("OpensMenu")]
+	if window then
+		openWindow(window)
+	end
 end)
 
 -- A quick hint once the player's data has loaded.
