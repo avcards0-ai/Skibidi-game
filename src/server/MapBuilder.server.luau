@@ -1,9 +1,11 @@
--- Builds the starter map: a sunny grass field with a stone plaza where players spawn.
+-- Builds the map: a sunny grass field with a stone plaza where players spawn, and
+-- the Sewers underneath it.
 --
 -- Layout (players spawn in the middle of the plaza, facing the title sign):
---   front: the SELL pad with a big sign above it, and the SKIBIDI SIMULATOR sign behind
---   left:  the Plunger Shop                right: the Rebirth shrine
---   back:  a pond with reeds, lily pads and benches
+--   front:       the SELL pad with a big sign above it, and the SKIBIDI SIMULATOR sign behind
+--   front-left:  the Egg Hatchery      front-right: the manhole down to the Sewers
+--   left:        the Plunger Shop      right:       the Rebirth shrine
+--   back:        a pond with reeds, lily pads and benches
 -- Oak, pine and birch trees, flower patches, bushes, rocks and lamp posts fill in
 -- the rest, and grassy hills (made of Terrain) with pine trees circle the area.
 --
@@ -12,7 +14,12 @@
 -- When a Model named "Map" is already in Workspace, this script doesn't build another.
 
 local Lighting = game:GetService("Lighting")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local Format = require(Shared:WaitForChild("Format"))
 
 local FLOOR = 0.2 -- height of the top of the grass
 
@@ -111,8 +118,8 @@ end
 local hills = {}
 for i = 1, 20 do
 	local angle = (i / 20) * TAU + hillRng:NextNumber(-0.1, 0.1)
-	local distance = hillRng:NextNumber(230, 290)
-	local radius = hillRng:NextNumber(40, 70)
+	local distance = hillRng:NextNumber(380, 460)
+	local radius = hillRng:NextNumber(55, 95)
 	table.insert(hills, {
 		center = Vector3.new(math.cos(angle) * distance, FLOOR - radius * 0.45, math.sin(angle) * distance),
 		radius = radius,
@@ -290,6 +297,29 @@ local function menuPrompt(target: BasePart, menu: string, actionText: string, ob
 	prompt.RequiresLineOfSight = false
 	prompt:SetAttribute("OpensMenu", menu)
 	prompt.Parent = target
+end
+
+-- A "Press E" prompt that GameServer handles, like hatching an egg or going into the Sewers.
+local function actionPrompt(target: BasePart, actionText: string, objectText: string, attribute: string, value: string)
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.ActionText = actionText
+	prompt.ObjectText = objectText
+	prompt.HoldDuration = 0
+	prompt.MaxActivationDistance = 12
+	prompt.RequiresLineOfSight = false
+	prompt:SetAttribute(attribute, value)
+	prompt.Parent = target
+end
+
+-- Sticks `attached` to `base` so it moves along with it.
+local function weld(base: BasePart, attached: BasePart)
+	attached.Anchored = false
+	attached.CanCollide = false
+	local joint = Instance.new("Weld")
+	joint.Part0 = base
+	joint.Part1 = attached
+	joint.C0 = base.CFrame:ToObjectSpace(attached.CFrame)
+	joint.Parent = attached
 end
 
 local function addLight(target: BasePart, color: Color3, range: number, brightness: number)
@@ -520,22 +550,50 @@ end
 -- Where things can go
 --------------------------------------------------------------------------------
 
-local sellCenter = Vector3.new(0, FLOOR, -48)
-local shopX = -60
-local shrineCenter = Vector3.new(60, FLOOR, 0)
-local titleZ = -88
-local pondCenter = Vector3.new(0, FLOOR, 62)
+local sellCenter = Vector3.new(0, FLOOR, -80)
+local shopX = -112
+local shrineCenter = Vector3.new(110, FLOOR, 0)
+local titleZ = -135
+local pondCenter = Vector3.new(0, FLOOR, 105)
 local pondRadius = 17
+local hatcheryCenter = Vector3.new(-82, FLOOR, -82)
+local sewerEntrance = Vector3.new(82, FLOOR, -82)
+local PLAZA_CENTER = Vector3.new(0, FLOOR, 0)
+
+-- A point `distance` studs from `from` in the direction of `to`, at ground level.
+local function toward(from: Vector3, to: Vector3, distance: number): Vector3
+	local flat = Vector3.new(to.X - from.X, 0, to.Z - from.Z)
+	return Vector3.new(from.X, 0, from.Z) + flat.Unit * distance
+end
+
+-- Stone paths from the plaza out to each area (flat, at y = 0).
+local PATH_WIDTH = 9
+local pathSegments = {
+	{ from = Vector3.new(0, 0, -18), to = toward(sellCenter, PLAZA_CENTER, 10) },
+	{ from = Vector3.new(0, 0, 18), to = toward(pondCenter, PLAZA_CENTER, pondRadius) },
+	{ from = Vector3.new(-18, 0, 0), to = Vector3.new(shopX + 16, 0, 0) },
+	{ from = Vector3.new(18, 0, 0), to = toward(shrineCenter, PLAZA_CENTER, 14) },
+	{ from = toward(PLAZA_CENTER, hatcheryCenter, 18), to = toward(hatcheryCenter, PLAZA_CENTER, 18) },
+	{ from = toward(PLAZA_CENTER, sewerEntrance, 18), to = toward(sewerEntrance, PLAZA_CENTER, 11) },
+}
 
 -- Areas to keep clear so nothing grows on the buildings or paths.
 local clearings = {
-	{ center = Vector3.new(0, 0, 0), radius = 24 }, -- plaza
+	{ center = Vector3.zero, radius = 24 }, -- plaza
 	{ center = sellCenter, radius = 20 },
-	{ center = Vector3.new(-58, 0, 0), radius = 24 }, -- shop
+	{ center = Vector3.new(shopX + 2, 0, 0), radius = 26 },
 	{ center = shrineCenter, radius = 17 },
-	{ center = Vector3.new(0, 0, titleZ), radius = 30 },
+	{ center = Vector3.new(0, 0, titleZ), radius = 32 },
 	{ center = pondCenter, radius = pondRadius + 4 },
+	{ center = hatcheryCenter, radius = 24 },
+	{ center = sewerEntrance, radius = 18 },
 }
+
+local function distanceToSegment(point: Vector3, from: Vector3, to: Vector3): number
+	local along = to - from
+	local t = math.clamp((point - from):Dot(along) / along:Dot(along), 0, 1)
+	return (point - (from + along * t)).Magnitude
+end
 
 local function isClear(spot: Vector3, margin: number): boolean
 	local flat = Vector3.new(spot.X, 0, spot.Z)
@@ -545,9 +603,12 @@ local function isClear(spot: Vector3, margin: number): boolean
 			return false
 		end
 	end
-	local onPathToSellOrPond = math.abs(flat.X) < 7 + margin and flat.Z > -40 and flat.Z < 46
-	local onPathToShopOrShrine = math.abs(flat.Z) < 7 + margin and flat.X > -48 and flat.X < 48
-	return not (onPathToSellOrPond or onPathToShopOrShrine)
+	for _, segment in pathSegments do
+		if distanceToSegment(flat, segment.from, segment.to) < PATH_WIDTH / 2 + 2.5 + margin then
+			return false
+		end
+	end
+	return true
 end
 
 -- Finds a random clear spot between two distances from the middle.
@@ -574,9 +635,9 @@ block(ground, CFrame.new(0, FLOOR - 1, 0), Vector3.new(2048, 2, 2048), GRASS, En
 
 -- Soft lighter and darker patches so the grass isn't one flat color. Each patch is
 -- a few overlapping circles, which makes a blobby, natural-looking shape.
-for _ = 1, 30 do
+for _ = 1, 40 do
 	local size = rng:NextNumber(8, 18)
-	local spot = randomSpot(20, 200, size)
+	local spot = randomSpot(20, 320, size)
 	if spot then
 		local target = pick({ Color3.fromRGB(80, 145, 60), Color3.fromRGB(120, 180, 80), Color3.fromRGB(115, 165, 70) })
 		local shade = GRASS:Lerp(target, rng:NextNumber(0.25, 0.45))
@@ -606,34 +667,56 @@ for i = 0, 3 do
 	end
 end
 
--- Stone paths from the plaza to the sell pad, shop, rebirth shrine and pond,
--- with little stones along their edges.
-local paths = group("Paths", ground)
-for _, path in {
-	{ center = Vector3.new(0, 0, -28.5), size = Vector3.new(9, 0, 21) }, -- sell
-	{ center = Vector3.new(0, 0, 32), size = Vector3.new(9, 0, 28) }, -- pond
-	{ center = Vector3.new(-32, 0, 0), size = Vector3.new(28, 0, 9) }, -- shop
-	{ center = Vector3.new(32, 0, 0), size = Vector3.new(28, 0, 9) }, -- rebirth
-} do
-	block(paths, CFrame.new(path.center + Vector3.new(0, FLOOR + 0.05, 0)), Vector3.new(path.size.X, 0.4, path.size.Z), PATH, Enum.Material.Cobblestone)
+-- A lamp post with a glowing glass lantern.
+local lamps = group("Lamps")
+local function lampPost(spot: Vector3)
+	local bottom = Vector3.new(spot.X, FLOOR, spot.Z)
+	pillar(lamps, bottom, 0.8, 1.4, DARK_METAL, Enum.Material.Metal)
+	pillar(lamps, bottom + Vector3.new(0, 0.8, 0), 8.4, 0.45, DARK_METAL, Enum.Material.Metal)
+	local lanternGlass = block(lamps, CFrame.new(bottom + Vector3.new(0, 10, 0)), Vector3.new(1.3, 1.8, 1.3), Color3.fromRGB(255, 235, 190), Enum.Material.Glass)
+	lanternGlass.Transparency = 0.4
+	local bulb = decor(ball(lamps, bottom + Vector3.new(0, 10, 0), 0.7, LAMP_GLOW, Enum.Material.Neon))
+	addLight(bulb, LAMP_GLOW, 18, 1.2)
+	block(lamps, CFrame.new(bottom + Vector3.new(0, 11.1, 0)), Vector3.new(1.8, 0.35, 1.8), DARK_METAL, Enum.Material.Metal)
+	ball(lamps, bottom + Vector3.new(0, 11.5, 0), 0.5, DARK_METAL, Enum.Material.Metal)
+end
 
-	local runsAlongZ = path.size.X < path.size.Z
-	local length = if runsAlongZ then path.size.Z else path.size.X
-	local halfWidth = (if runsAlongZ then path.size.X else path.size.Z) / 2 + 0.6
-	for along = -length / 2 + 1.5, length / 2 - 1.5, 2.2 do
+-- The stone paths, with little stones along their edges and lamp posts every so often.
+local paths = group("Paths", ground)
+for _, segment in pathSegments do
+	local from, to = segment.from, segment.to
+	local length = (to - from).Magnitude
+	local direction = (to - from).Unit
+	local sideways = Vector3.new(-direction.Z, 0, direction.X)
+	local middle = (from + to) / 2
+	block(
+		paths,
+		CFrame.lookAt(middle, to) + Vector3.new(0, FLOOR + 0.05, 0),
+		Vector3.new(PATH_WIDTH, 0.4, length),
+		PATH,
+		Enum.Material.Cobblestone
+	)
+
+	for along = 1.5, length - 1.5, 2.2 do
 		for _, side in { -1, 1 } do
-			if rng:NextNumber() < 0.7 then
-				local offset = if runsAlongZ then Vector3.new(side * halfWidth, 0, along) else Vector3.new(along, 0, side * halfWidth)
+			if rng:NextNumber() < 0.55 then
 				local size = rng:NextNumber(0.7, 1.3)
+				local spot = from + direction * along + sideways * (side * (PATH_WIDTH / 2 + 0.6))
 				block(
 					paths,
-					CFrame.new(path.center + offset + Vector3.new(0, FLOOR + 0.1, 0)) * CFrame.Angles(0, rng:NextNumber(0, TAU), 0),
+					CFrame.new(spot + Vector3.new(0, FLOOR + 0.1, 0)) * CFrame.Angles(0, rng:NextNumber(0, TAU), 0),
 					Vector3.new(size, 0.45, size * 0.8),
 					darken(STONE, rng:NextNumber(0, 0.2)),
 					Enum.Material.Rock
 				)
 			end
 		end
+	end
+
+	local lampSide = 1
+	for along = 12, length - 6, 26 do
+		lampPost(from + direction * along + sideways * (lampSide * (PATH_WIDTH / 2 + 2.5)))
+		lampSide = -lampSide
 	end
 end
 
@@ -653,31 +736,36 @@ end
 -- Sell pad with a big sign above it (in front of the spawn)
 --------------------------------------------------------------------------------
 
-local sellArea = group("SellArea")
+-- A glowing sell pad under an arch with the SELL sign on it. `base` sits on the floor.
+-- GameServer sells your Flushes when you touch any part named "SellPad".
+local function sellStation(parent: Instance, base: CFrame, withCoins: boolean)
+	local center = base.Position
+	pillar(parent, center - Vector3.new(0, 0.2, 0), 0.7, 20, STONE, Enum.Material.Slate)
+	local pad = pillar(parent, center - Vector3.new(0, 0.2, 0), 1, 16, Color3.fromRGB(70, 220, 100), Enum.Material.Neon)
+	pad.Name = "SellPad"
 
-pillar(sellArea, sellCenter - Vector3.new(0, 0.2, 0), 0.7, 20, STONE, Enum.Material.Slate)
+	for _, side in { -1, 1 } do
+		block(parent, base * CFrame.new(11.5 * side, 7, 0), Vector3.new(1.8, 14, 1.8), WOOD_DARK, Enum.Material.Wood)
+		ball(parent, (base * CFrame.new(11.5 * side, 16.2, 0)).Position, 2, GOLD, Enum.Material.Foil)
+	end
+	block(parent, base * CFrame.new(0, 14.6, 0), Vector3.new(27, 1.2, 2), WOOD_DARK, Enum.Material.Wood)
+	local sign = block(parent, base * CFrame.new(0, 11.5, 0), Vector3.new(21, 5, 1.2), Color3.fromRGB(40, 120, 60))
+	surfaceText(sign, Enum.NormalId.Back, "💰 SELL 💰", WHITE)
+	surfaceText(sign, Enum.NormalId.Front, "💰 SELL 💰", WHITE)
 
--- GameServer looks for a part named "SellPad" and sells your Flushes when you touch it.
-local sellPad = pillar(sellArea, sellCenter - Vector3.new(0, 0.2, 0), 1, 16, Color3.fromRGB(70, 220, 100), Enum.Material.Neon)
-sellPad.Name = "SellPad"
-
--- An arch over the pad with the SELL sign on it.
-for _, side in { -1, 1 } do
-	block(sellArea, CFrame.new(sellCenter + Vector3.new(11.5 * side, 7, 0)), Vector3.new(1.8, 14, 1.8), WOOD_DARK, Enum.Material.Wood)
-	ball(sellArea, sellCenter + Vector3.new(11.5 * side, 16.2, 0), 2, GOLD, Enum.Material.Foil)
-end
-block(sellArea, CFrame.new(sellCenter + Vector3.new(0, 14.6, 0)), Vector3.new(27, 1.2, 2), WOOD_DARK, Enum.Material.Wood)
-local sellSign = block(sellArea, CFrame.new(sellCenter + Vector3.new(0, 11.5, 0)), Vector3.new(21, 5, 1.2), Color3.fromRGB(40, 120, 60))
-surfaceText(sellSign, Enum.NormalId.Back, "💰 SELL 💰", WHITE)
-surfaceText(sellSign, Enum.NormalId.Front, "💰 SELL 💰", WHITE)
-
--- Piles of gold coins beside the pad.
-for _, spot in { Vector3.new(-15, 0, 3), Vector3.new(15, 0, 3), Vector3.new(-14.5, 0, -4), Vector3.new(14.5, 0, -4) } do
-	for i = 1, rng:NextInteger(4, 8) do
-		local jitter = Vector3.new(rng:NextNumber(-0.3, 0.3), 0, rng:NextNumber(-0.3, 0.3))
-		pillar(sellArea, sellCenter + spot + jitter + Vector3.new(0, (i - 1) * 0.45, 0), 0.45, 2.4, GOLD, Enum.Material.Foil)
+	-- Piles of gold coins beside the pad.
+	if withCoins then
+		for _, spot in { Vector3.new(-15, 0, 3), Vector3.new(15, 0, 3), Vector3.new(-14.5, 0, -4), Vector3.new(14.5, 0, -4) } do
+			for i = 1, rng:NextInteger(4, 8) do
+				local jitter = Vector3.new(rng:NextNumber(-0.3, 0.3), 0, rng:NextNumber(-0.3, 0.3))
+				local bottom = (base * CFrame.new(spot + jitter)).Position + Vector3.new(0, (i - 1) * 0.45, 0)
+				pillar(parent, bottom, 0.45, 2.4, GOLD, Enum.Material.Foil)
+			end
+		end
 	end
 end
+
+sellStation(group("SellArea"), CFrame.new(sellCenter), true)
 
 --------------------------------------------------------------------------------
 -- Plunger Shop (left of the spawn, facing it)
@@ -930,30 +1018,431 @@ bench(pondCenter + Vector3.new(-24, 0, 0), pondCenter)
 bench(pondCenter + Vector3.new(24, 0, 0), pondCenter)
 
 --------------------------------------------------------------------------------
--- Lamp posts along the paths
+-- Egg Hatchery (front-left of the spawn): one egg on a stand for each egg in Config
 --------------------------------------------------------------------------------
 
-local lamps = group("Lamps")
-for _, spot in {
-	Vector3.new(-7, 0, -28),
-	Vector3.new(7, 0, -28),
-	Vector3.new(-7, 0, 30),
-	Vector3.new(7, 0, 30),
-	Vector3.new(-34, 0, -7),
-	Vector3.new(-34, 0, 7),
-	Vector3.new(34, 0, -7),
-	Vector3.new(34, 0, 7),
-} do
-	local bottom = spot + Vector3.new(0, FLOOR, 0)
-	pillar(lamps, bottom, 0.8, 1.4, DARK_METAL, Enum.Material.Metal)
-	pillar(lamps, bottom + Vector3.new(0, 0.8, 0), 8.4, 0.45, DARK_METAL, Enum.Material.Metal)
-	local lanternGlass = block(lamps, CFrame.new(bottom + Vector3.new(0, 10, 0)), Vector3.new(1.3, 1.8, 1.3), Color3.fromRGB(255, 235, 190), Enum.Material.Glass)
-	lanternGlass.Transparency = 0.4
-	local bulb = decor(ball(lamps, bottom + Vector3.new(0, 10, 0), 0.7, LAMP_GLOW, Enum.Material.Neon))
-	addLight(bulb, LAMP_GLOW, 18, 1.2)
-	block(lamps, CFrame.new(bottom + Vector3.new(0, 11.1, 0)), Vector3.new(1.8, 0.35, 1.8), DARK_METAL, Enum.Material.Metal)
-	ball(lamps, bottom + Vector3.new(0, 11.5, 0), 0.5, DARK_METAL, Enum.Material.Metal)
+local hatchery = group("EggHatchery")
+local hatcheryBase = CFrame.lookAt(hatcheryCenter, PLAZA_CENTER) -- its front (-Z) faces the plaza
+local bobbingEggs: { BasePart } = {}
+
+pillar(hatchery, hatcheryCenter - Vector3.new(0, 0.2, 0), 0.6, 38, STONE, Enum.Material.Slate)
+pillar(hatchery, hatcheryCenter - Vector3.new(0, 0.2, 0), 0.7, 35, Color3.fromRGB(235, 225, 205), Enum.Material.Pavement)
+
+for i, egg in Config.Eggs do
+	-- Right to left in the stand's own view, so players walking up read them left to right.
+	local spot = hatcheryBase * CFrame.new(((#Config.Eggs + 1) / 2 - i) * 7.5, 0.5, 2)
+	local stand = block(hatchery, spot * CFrame.new(0, 1.5, 0), Vector3.new(5, 3, 5), MARBLE, Enum.Material.Marble)
+	stand.Name = egg.Name .. " Stand"
+	block(hatchery, spot * CFrame.new(0, 3.2, 0), Vector3.new(5.4, 0.4, 5.4), egg.Color, Enum.Material.Neon)
+
+	-- A sphere mesh stretches to fill the part, so a tall part makes an egg shape.
+	local eggPart = part({
+		Name = egg.Name,
+		Size = Vector3.new(3.4, 4.4, 3.4),
+		CFrame = spot * CFrame.new(0, 5.6, 0),
+		Color = egg.Color,
+		Parent = hatchery,
+	})
+	local mesh = Instance.new("SpecialMesh")
+	mesh.MeshType = Enum.MeshType.Sphere
+	mesh.Parent = eggPart
+
+	-- Spots on the shell, welded on so they bob with the egg.
+	for dot = 1, 6 do
+		local around = (dot / 6) * TAU + rng:NextNumber(-0.3, 0.3)
+		local up = rng:NextNumber(-0.5, 0.7)
+		local onShell = Vector3.new(math.cos(around) * math.cos(up) * 1.7, math.sin(up) * 2.2, math.sin(around) * math.cos(up) * 1.7)
+		weld(eggPart, decor(ball(hatchery, (eggPart.CFrame * CFrame.new(onShell)).Position, 0.7, egg.Color:Lerp(WHITE, 0.55))))
+	end
+
+	actionPrompt(stand, "Hatch", ("%s (%s coins)"):format(egg.Name, Format.number(egg.Price)), "Egg", egg.Name)
+	floatingLabel(stand, ("%s\n💰 %s"):format(egg.Name, Format.number(egg.Price)), egg.Color:Lerp(WHITE, 0.3), 9.5)
+	table.insert(bobbingEggs, eggPart)
 end
+
+-- The sign behind the eggs.
+local hatcherySign = hatcheryBase * CFrame.new(0, 0, 10)
+for _, side in { -1, 1 } do
+	block(hatchery, hatcherySign * CFrame.new(16 * side, 8, 0), Vector3.new(1.8, 16, 1.8), WOOD_DARK, Enum.Material.Wood)
+end
+block(hatchery, hatcherySign * CFrame.new(0, 16.4, 0), Vector3.new(34, 1.2, 2), WOOD_DARK, Enum.Material.Wood)
+local hatcheryBoard = block(hatchery, hatcherySign * CFrame.new(0, 13, 0), Vector3.new(30, 5.5, 1.2), Color3.fromRGB(250, 240, 215), Enum.Material.WoodPlanks)
+surfaceText(hatcheryBoard, Enum.NormalId.Front, "🥚 EGG HATCHERY 🥚", Color3.fromRGB(255, 150, 50))
+
+--------------------------------------------------------------------------------
+-- Sewer entrance (front-right of the spawn): a glowing manhole with pipes
+--------------------------------------------------------------------------------
+
+local SLUDGE = Color3.fromRGB(110, 190, 50)
+local RUST = Color3.fromRGB(125, 85, 55)
+local BRICK_RED = Color3.fromRGB(130, 75, 60)
+local METAL = Color3.fromRGB(95, 100, 105)
+
+local entrance = group("SewerEntrance")
+local entranceBase = CFrame.lookAt(sewerEntrance, PLAZA_CENTER) -- its front (-Z) faces the plaza
+local entranceBottom = sewerEntrance - Vector3.new(0, 0.2, 0)
+
+pillar(entrance, entranceBottom, 2, 18, BRICK_RED, Enum.Material.Brick)
+pillar(entrance, entranceBottom, 2.02, 14.5, METAL, Enum.Material.DiamondPlate)
+pillar(entrance, entranceBottom, 2.05, 13, Color3.fromRGB(15, 20, 15)).Name = "SewerHole"
+local sewerGlow = pillar(entrance, entranceBottom, 2.1, 9, SLUDGE, Enum.Material.Neon)
+sewerGlow.Name = "SewerGlow"
+actionPrompt(
+	sewerGlow,
+	"Enter the Sewers",
+	("Unlock once: %s coins"):format(Format.number(Config.SewerUnlockPrice)),
+	"TeleportTo",
+	"Sewer"
+)
+floatingLabel(sewerGlow, "☣️ SEWERS", Color3.fromRGB(160, 255, 110), 11)
+
+-- Green fumes rising out of the hole. (The cylinder is lying on its side and
+-- turned upright, so its "Right" face is the one pointing up.)
+local fumes = Instance.new("ParticleEmitter")
+fumes.EmissionDirection = Enum.NormalId.Right
+fumes.Color = ColorSequence.new(Color3.fromRGB(140, 255, 100))
+fumes.LightEmission = 0.5
+fumes.Size = NumberSequence.new(1.6, 0)
+fumes.Transparency = NumberSequence.new(0.4, 1)
+fumes.Lifetime = NumberRange.new(1.5, 2.5)
+fumes.Rate = 10
+fumes.Speed = NumberRange.new(3, 6)
+fumes.SpreadAngle = Vector2.new(15, 15)
+fumes.Parent = sewerGlow
+
+-- The manhole cover, leaning against nothing in particular.
+part({
+	Name = "ManholeCover",
+	Shape = Enum.PartType.Cylinder,
+	Size = Vector3.new(0.6, 9, 9),
+	CFrame = entranceBase * CFrame.new(-11.5, 4.4, 1) * CFrame.Angles(0, 0, math.rad(12)),
+	Color = METAL,
+	Material = Enum.Material.DiamondPlate,
+	Parent = entrance,
+})
+
+-- Rusty pipes coming out of the ground.
+for _, pipe in { { x = 11, height = 9, reach = -6 }, { x = 14, height = 5, reach = 5 } } do
+	local bottom = (entranceBase * CFrame.new(pipe.x, -1, 4)).Position
+	local bend = (entranceBase * CFrame.new(pipe.x, pipe.height, 4)).Position
+	local tip = (entranceBase * CFrame.new(pipe.x, pipe.height, 4 + pipe.reach)).Position
+	rod(entrance, bottom, bend, 3, RUST, Enum.Material.CorrodedMetal)
+	ball(entrance, bend, 3.3, RUST, Enum.Material.CorrodedMetal)
+	rod(entrance, bend, tip, 3, RUST, Enum.Material.CorrodedMetal)
+	rod(entrance, tip - (tip - bend).Unit * 0.4, tip + (tip - bend).Unit * 0.2, 3.6, darken(RUST, 0.3), Enum.Material.CorrodedMetal)
+end
+
+-- Toxic puddles.
+for _ = 1, 4 do
+	local spot = (entranceBase * CFrame.new(rng:NextNumber(-14, 14), 0, rng:NextNumber(-12, -8))).Position
+	decor(pillar(entrance, spot - Vector3.new(0, 0.1, 0), 0.16, rng:NextNumber(1.5, 3.5), SLUDGE, Enum.Material.Glass)).Transparency = 0.2
+end
+
+-- The sign.
+local entranceSign = entranceBase * CFrame.new(0, 0, 11)
+for _, side in { -1, 1 } do
+	block(entrance, entranceSign * CFrame.new(8.5 * side, 6, 0), Vector3.new(1.2, 12, 1.2), DARK_METAL, Enum.Material.Metal)
+end
+local entranceBoard = block(entrance, entranceSign * CFrame.new(0, 10, 0), Vector3.new(16, 4, 0.8), Color3.fromRGB(35, 45, 30), Enum.Material.Metal)
+surfaceText(entranceBoard, Enum.NormalId.Front, "☣️ THE SEWERS ☣️", Color3.fromRGB(160, 255, 110))
+local entranceInfo = block(entrance, entranceSign * CFrame.new(0, 7.1, 0), Vector3.new(14, 1.8, 0.6), Color3.fromRGB(35, 45, 30), Enum.Material.Metal)
+surfaceText(
+	entranceInfo,
+	Enum.NormalId.Front,
+	("%gx Flushes • Unlock: %s"):format(Config.SewerMultiplier, Format.number(Config.SewerUnlockPrice)),
+	WHITE
+)
+
+-- Where players appear when they climb out of the Sewers.
+part({
+	Name = "SurfaceArrival",
+	Size = Vector3.new(4, 1, 4),
+	CFrame = entranceBase * CFrame.new(0, 1, -13),
+	Transparency = 1,
+	CanCollide = false,
+	CanQuery = false,
+	CanTouch = false,
+	Parent = entrance,
+})
+
+--------------------------------------------------------------------------------
+-- The Sewers, deep underground: a big room in the middle with a sludge channel
+-- running through it and four long tunnels. Clicks down here give extra Flushes.
+--------------------------------------------------------------------------------
+
+local sewer = group("Sewers")
+local SEWER_Y = Config.SewerDepth -- height of the walkways
+local HUB = 40 -- the middle room is 80 x 80
+local HUB_HEIGHT = 36
+local TUNNEL_LENGTH = 120
+local TUNNEL_HALF = 18 -- tunnels are 36 wide
+local TUNNEL_HEIGHT = 26
+local CHANNEL_HALF = 6 -- the sludge channel is 12 wide
+local BRICK = Color3.fromRGB(88, 92, 80)
+local CONCRETE = Color3.fromRGB(100, 104, 96)
+local MOSS = Color3.fromRGB(70, 95, 50)
+local SEWER_LIGHT = Color3.fromRGB(210, 255, 170)
+
+local function at(x: number, y: number, z: number): Vector3
+	return Vector3.new(x, SEWER_Y + y, z)
+end
+
+-- A concrete walkway whose top is the sewer floor. Only X and Z of `center` and `size` are used.
+local function walkway(center: Vector3, size: Vector3)
+	block(sewer, CFrame.new(at(center.X, -2.5, center.Z)), Vector3.new(size.X, 5, size.Z), CONCRETE, Enum.Material.Concrete)
+end
+
+-- A stretch of channel: a muddy bed with see-through green sludge you can wade through.
+local function channel(center: Vector3, size: Vector3)
+	block(sewer, CFrame.new(at(center.X, -4, center.Z)), Vector3.new(size.X, 2, size.Z), Color3.fromRGB(40, 48, 32), Enum.Material.Mud)
+	local sludge = block(sewer, CFrame.new(at(center.X, -1.4, center.Z)), Vector3.new(size.X, 0.4, size.Z), SLUDGE, Enum.Material.Glass)
+	sludge.Name = "Sludge"
+	sludge.Transparency = 0.15
+	sludge.CanCollide = false
+end
+
+local function wallLamp(position: Vector3, facing: Vector3)
+	block(sewer, CFrame.lookAt(position, position + facing), Vector3.new(1.4, 1.8, 0.6), DARK_METAL, Enum.Material.Metal)
+	local bulb = decor(ball(sewer, position + facing * 0.6, 0.9, SEWER_LIGHT, Enum.Material.Neon))
+	addLight(bulb, SEWER_LIGHT, 26, 1.6)
+end
+
+local function toxicBarrel(bottom: Vector3)
+	pillar(sewer, bottom, 3.6, 2.6, Color3.fromRGB(55, 75, 45), Enum.Material.Metal)
+	pillar(sewer, bottom + Vector3.new(0, 1.4, 0), 0.5, 2.7, SLUDGE, Enum.Material.Neon)
+	pillar(sewer, bottom + Vector3.new(0, 3.6, 0), 0.15, 2.3, Color3.fromRGB(40, 50, 35), Enum.Material.Metal)
+end
+
+local function rat(spot: Vector3, facing: Vector3)
+	local base = CFrame.lookAt(spot, spot + facing)
+	local fur = Color3.fromRGB(110, 105, 110)
+	local pink = Color3.fromRGB(240, 160, 170)
+	decor(ball(sewer, (base * CFrame.new(0, 0.5, 0)).Position, 1.1, fur))
+	decor(ball(sewer, (base * CFrame.new(0, 0.6, -0.7)).Position, 0.7, fur))
+	decor(ball(sewer, (base * CFrame.new(0, 0.55, -1.05)).Position, 0.2, pink))
+	decor(rod(sewer, (base * CFrame.new(0, 0.4, 0.5)).Position, (base * CFrame.new(0.3, 0.3, 1.7)).Position, 0.1, pink))
+end
+
+-- The middle room's floor: four walkways around a cross of sludge channels.
+local corner = (CHANNEL_HALF + HUB) / 2
+for _, x in { -corner, corner } do
+	for _, z in { -corner, corner } do
+		walkway(Vector3.new(x, 0, z), Vector3.new(HUB - CHANNEL_HALF, 0, HUB - CHANNEL_HALF))
+	end
+end
+channel(Vector3.zero, Vector3.new(CHANNEL_HALF * 2, 0, HUB * 2))
+for _, x in { -corner, corner } do
+	channel(Vector3.new(x, 0, 0), Vector3.new(HUB - CHANNEL_HALF, 0, CHANNEL_HALF * 2))
+end
+
+-- Metal bridges over the channels, with railings.
+for _, bridge in {
+	{ center = Vector3.new(0, 0, corner), spansX = true },
+	{ center = Vector3.new(0, 0, -corner), spansX = true },
+	{ center = Vector3.new(corner, 0, 0), spansX = false },
+	{ center = Vector3.new(-corner, 0, 0), spansX = false },
+} do
+	local deck = if bridge.spansX then Vector3.new(CHANNEL_HALF * 2 + 2, 0.6, 7) else Vector3.new(7, 0.6, CHANNEL_HALF * 2 + 2)
+	block(sewer, CFrame.new(at(bridge.center.X, 0, bridge.center.Z)), deck, METAL, Enum.Material.DiamondPlate)
+	for _, side in { -3.2, 3.2 } do
+		local offset = if bridge.spansX then Vector3.new(0, 0, side) else Vector3.new(side, 0, 0)
+		local railCenter = bridge.center + offset
+		local halfSpan = if bridge.spansX then Vector3.new(CHANNEL_HALF + 1, 0, 0) else Vector3.new(0, 0, CHANNEL_HALF + 1)
+		rod(sewer, at(railCenter.X, 3, railCenter.Z) - halfSpan, at(railCenter.X, 3, railCenter.Z) + halfSpan, 0.25, SLUDGE, Enum.Material.Metal)
+		for _, post in { -1, 1 } do
+			local postSpot = railCenter + halfSpan * post
+			pillar(sewer, at(postSpot.X, 0.3, postSpot.Z), 2.8, 0.3, DARK_METAL, Enum.Material.Metal)
+		end
+	end
+end
+
+-- The middle room's walls (with openings for the tunnels), ceiling and corner pillars.
+for _, side in { Vector3.new(1, 0, 0), Vector3.new(-1, 0, 0), Vector3.new(0, 0, 1), Vector3.new(0, 0, -1) } do
+	local along = Vector3.new(side.Z, 0, -side.X)
+	local wallLine = side * (HUB + 1)
+	local function wallSize(length: number, height: number): Vector3
+		return if side.X ~= 0 then Vector3.new(2, height, length) else Vector3.new(length, height, 2)
+	end
+	for _, s in { -1, 1 } do
+		local center = wallLine + along * (s * (TUNNEL_HALF + (HUB + 2 - TUNNEL_HALF) / 2))
+		block(sewer, CFrame.new(at(center.X, (HUB_HEIGHT - 5) / 2, center.Z)), wallSize(HUB + 2 - TUNNEL_HALF, HUB_HEIGHT + 5), BRICK, Enum.Material.Brick)
+	end
+	-- above the tunnel opening
+	block(sewer, CFrame.new(at(wallLine.X, (TUNNEL_HEIGHT + HUB_HEIGHT) / 2, wallLine.Z)), wallSize(TUNNEL_HALF * 2, HUB_HEIGHT - TUNNEL_HEIGHT), BRICK, Enum.Material.Brick)
+	-- moss along the bottom of the walls
+	local mossLine = side * (HUB - 0.05)
+	for _, s in { -1, 1 } do
+		local center = mossLine + along * (s * (TUNNEL_HALF + (HUB - TUNNEL_HALF) / 2))
+		local mossSize = if side.X ~= 0 then Vector3.new(0.3, 3, HUB - TUNNEL_HALF) else Vector3.new(HUB - TUNNEL_HALF, 3, 0.3)
+		block(sewer, CFrame.new(at(center.X, 1.5, center.Z)), mossSize, MOSS, Enum.Material.LeafyGrass)
+	end
+	-- lamps on the walls either side of the opening
+	for _, s in { -1, 1 } do
+		local spot = side * (HUB - 0.3) + along * (s * (TUNNEL_HALF + 8))
+		wallLamp(at(spot.X, 10, spot.Z), -side)
+	end
+end
+block(sewer, CFrame.new(at(0, HUB_HEIGHT + 1, 0)), Vector3.new(HUB * 2 + 4, 2, HUB * 2 + 4), darken(CONCRETE, 0.2), Enum.Material.Concrete)
+for _, x in { -1, 1 } do
+	for _, z in { -1, 1 } do
+		block(sewer, CFrame.new(at(x * (HUB - 3), (HUB_HEIGHT - 5) / 2, z * (HUB - 3))), Vector3.new(6, HUB_HEIGHT + 5, 6), darken(BRICK, 0.15), Enum.Material.Brick)
+	end
+end
+
+-- Big lamps hanging from the ceiling.
+for _, x in { -corner, corner } do
+	for _, z in { -corner, corner } do
+		rod(sewer, at(x, HUB_HEIGHT, z), at(x, 25, z), 0.3, DARK_METAL, Enum.Material.Metal)
+		block(sewer, CFrame.new(at(x, 24.6, z)), Vector3.new(3.2, 0.8, 3.2), DARK_METAL, Enum.Material.Metal)
+		local bulb = decor(ball(sewer, at(x, 23.8, z), 1.4, SEWER_LIGHT, Enum.Material.Neon))
+		addLight(bulb, SEWER_LIGHT, 45, 2.2)
+	end
+end
+
+-- The four tunnels.
+for _, direction in { Vector3.new(1, 0, 0), Vector3.new(-1, 0, 0), Vector3.new(0, 0, 1), Vector3.new(0, 0, -1) } do
+	local across = Vector3.new(direction.Z, 0, -direction.X)
+	local function size(along: number, side: number, height: number): Vector3
+		return if direction.X ~= 0 then Vector3.new(along, height, side) else Vector3.new(side, height, along)
+	end
+	local middle = direction * (HUB + TUNNEL_LENGTH / 2)
+
+	channel(middle, size(TUNNEL_LENGTH, CHANNEL_HALF * 2, 0))
+	for _, s in { -1, 1 } do
+		walkway(middle + across * (s * (CHANNEL_HALF + TUNNEL_HALF) / 2), size(TUNNEL_LENGTH, TUNNEL_HALF - CHANNEL_HALF, 0))
+
+		local wallCenter = middle + across * (s * (TUNNEL_HALF + 1))
+		block(sewer, CFrame.new(at(wallCenter.X, (TUNNEL_HEIGHT - 5) / 2, wallCenter.Z)), size(TUNNEL_LENGTH, 2, TUNNEL_HEIGHT + 5), BRICK, Enum.Material.Brick)
+		local mossCenter = middle + across * (s * (TUNNEL_HALF - 0.05))
+		block(sewer, CFrame.new(at(mossCenter.X, 1.5, mossCenter.Z)), size(TUNNEL_LENGTH, 0.3, 3), MOSS, Enum.Material.LeafyGrass)
+
+		-- Slanted pieces in the top corners make the tunnel look rounded.
+		local inward = across * -s
+		local cornerTop = middle + across * (s * TUNNEL_HALF)
+		wedge(
+			sewer,
+			CFrame.fromMatrix(at(cornerTop.X, TUNNEL_HEIGHT - 2.5, cornerTop.Z) + inward * 2.5, Vector3.yAxis:Cross(inward), -Vector3.yAxis),
+			Vector3.new(TUNNEL_LENGTH, 5, 5),
+			CONCRETE,
+			Enum.Material.Concrete
+		)
+
+		-- A rusty pipe along the wall.
+		local pipeLine = middle + across * (s * (TUNNEL_HALF - 1.8))
+		local pipeStart = at(pipeLine.X, TUNNEL_HEIGHT - 8, pipeLine.Z) - direction * (TUNNEL_LENGTH / 2)
+		rod(sewer, pipeStart, pipeStart + direction * TUNNEL_LENGTH, 2.4, RUST, Enum.Material.CorrodedMetal)
+		for ring = 1, 5 do
+			local ringSpot = pipeStart + direction * (ring * TUNNEL_LENGTH / 6)
+			rod(sewer, ringSpot - direction * 0.4, ringSpot + direction * 0.4, 2.9, darken(RUST, 0.3), Enum.Material.CorrodedMetal)
+		end
+	end
+	block(sewer, CFrame.new(at(middle.X, TUNNEL_HEIGHT + 1, middle.Z)), size(TUNNEL_LENGTH, TUNNEL_HALF * 2 + 4, 2), darken(CONCRETE, 0.2), Enum.Material.Concrete)
+
+	-- The far end: a brick wall with a big pipe pouring sludge into the channel.
+	local farEnd = direction * (HUB + TUNNEL_LENGTH)
+	local endWall = farEnd + direction
+	block(sewer, CFrame.new(at(endWall.X, (TUNNEL_HEIGHT - 5) / 2, endWall.Z)), size(2, TUNNEL_HALF * 2 + 4, TUNNEL_HEIGHT + 5), BRICK, Enum.Material.Brick)
+	local pipeMouth = at(farEnd.X, 9, farEnd.Z) - direction * 4
+	rod(sewer, at(farEnd.X, 9, farEnd.Z), pipeMouth, 7, RUST, Enum.Material.CorrodedMetal)
+	rod(sewer, pipeMouth, pipeMouth - direction * 0.6, 7.8, darken(RUST, 0.3), Enum.Material.CorrodedMetal)
+	local pour = block(sewer, CFrame.new(at(farEnd.X, 2.4, farEnd.Z) - direction * 4.6), size(1.2, 4, 7.4), SLUDGE, Enum.Material.Neon)
+	pour.Transparency = 0.25
+	pour.CanCollide = false
+
+	-- Lamps along the walls, and some junk on the walkways.
+	for k = 1, 5 do
+		local s = if k % 2 == 0 then 1 else -1
+		local spot = middle + direction * ((k - 3) * 22) + across * (s * (TUNNEL_HALF - 0.3))
+		wallLamp(at(spot.X, 9, spot.Z), across * -s)
+	end
+	for _ = 1, 3 do
+		local s = if rng:NextNumber() < 0.5 then 1 else -1
+		local spot = middle + direction * rng:NextNumber(-50, 50) + across * (s * rng:NextNumber(10, 15))
+		if rng:NextNumber() < 0.6 then
+			toxicBarrel(at(spot.X, 0, spot.Z))
+		else
+			block(sewer, CFrame.new(at(spot.X, 1.5, spot.Z)) * CFrame.Angles(0, rng:NextNumber(0, TAU), 0), Vector3.new(3, 3, 3), WOOD, Enum.Material.WoodPlanks)
+		end
+	end
+	local ratSpot = middle + direction * rng:NextNumber(-40, 40) + across * (rng:NextNumber(8, 16) * (if rng:NextNumber() < 0.5 then 1 else -1))
+	rat(at(ratSpot.X, 0, ratSpot.Z), direction)
+end
+
+-- Bubbles and a lost rubber duck floating in the sludge.
+for _ = 1, 24 do
+	local alongZ = rng:NextNumber() < 0.5
+	local distance = rng:NextNumber(-HUB - TUNNEL_LENGTH + 10, HUB + TUNNEL_LENGTH - 10)
+	local offset = rng:NextNumber(-CHANNEL_HALF + 1, CHANNEL_HALF - 1)
+	local spot = if alongZ then Vector3.new(offset, 0, distance) else Vector3.new(distance, 0, offset)
+	decor(ball(sewer, at(spot.X, -1.2, spot.Z), rng:NextNumber(0.4, 0.9), Color3.fromRGB(150, 220, 80), Enum.Material.Glass)).Transparency = 0.3
+end
+local duckSpot = at(2, -1.2, 14)
+local duckYellow = Color3.fromRGB(255, 215, 40)
+decor(ball(sewer, duckSpot, 1.8, duckYellow))
+decor(ball(sewer, duckSpot + Vector3.new(0, 1, -0.5), 1.2, duckYellow))
+decor(block(sewer, CFrame.new(duckSpot + Vector3.new(0, 0.9, -1.15)), Vector3.new(0.55, 0.22, 0.5), Color3.fromRGB(255, 140, 30)))
+
+-- The sell pad down here, in one corner of the middle room.
+sellStation(sewer, CFrame.lookAt(at(-corner, 0, -corner), at(0, 0, 0)), false)
+
+-- Where players arrive, in the opposite corner.
+part({
+	Name = "SewerArrival",
+	Size = Vector3.new(4, 1, 4),
+	CFrame = CFrame.lookAt(at(corner, 1, corner), at(0, 1, 0)),
+	Transparency = 1,
+	CanCollide = false,
+	CanQuery = false,
+	CanTouch = false,
+	Parent = sewer,
+})
+
+-- The way back up: a ladder to a hole in the ceiling, with an EXIT sign.
+local ladderSpot = at(30, HUB_HEIGHT / 2, HUB - 1)
+local ladder = Instance.new("TrussPart")
+ladder.Anchored = true
+ladder.Size = Vector3.new(2, HUB_HEIGHT, 2)
+ladder.CFrame = CFrame.new(ladderSpot)
+ladder.Color = DARK_METAL
+ladder.Material = Enum.Material.Metal
+ladder.Parent = sewer
+pillar(sewer, at(30, HUB_HEIGHT - 0.2, HUB - 1), 0.25, 5, Color3.fromRGB(10, 10, 10))
+local skylight = decor(pillar(sewer, at(30, HUB_HEIGHT - 14, HUB - 1), 14, 3.5, Color3.fromRGB(255, 250, 220), Enum.Material.Neon))
+skylight.Transparency = 0.88
+local exitSign = block(sewer, CFrame.new(at(35.5, 5, HUB - 0.2)), Vector3.new(6, 2.5, 0.4), Color3.fromRGB(30, 130, 60), Enum.Material.SmoothPlastic)
+exitSign.Name = "ExitSign"
+surfaceText(exitSign, Enum.NormalId.Front, "⬆ EXIT", WHITE)
+actionPrompt(exitSign, "Climb Out", "Back to the surface", "TeleportTo", "Surface")
+
+-- Signs over the tunnel openings.
+local northSign = block(sewer, CFrame.new(at(0, TUNNEL_HEIGHT + 5, -HUB + 0.5)), Vector3.new(32, 6, 1), Color3.fromRGB(35, 45, 30), Enum.Material.Metal)
+surfaceText(northSign, Enum.NormalId.Back, "☣️ THE SEWERS ☣️", Color3.fromRGB(160, 255, 110))
+local southSign = block(sewer, CFrame.new(at(0, TUNNEL_HEIGHT + 5, HUB - 0.5)), Vector3.new(32, 6, 1), Color3.fromRGB(35, 45, 30), Enum.Material.Metal)
+surfaceText(southSign, Enum.NormalId.Front, ("%gx FLUSHES DOWN HERE!"):format(Config.SewerMultiplier), Color3.fromRGB(255, 220, 90))
+
+-- Toxic barrels, crates and a big valve pipe in the middle room.
+for _, spot in { at(corner + 6, 0, -corner - 8), at(corner + 9, 0, -corner - 5), at(corner + 5, 0, -corner - 3) } do
+	toxicBarrel(spot)
+end
+for _, spot in { at(-corner - 8, 0, corner + 6), at(-corner - 5, 0, corner + 9) } do
+	toxicBarrel(spot)
+end
+block(sewer, CFrame.new(at(-corner + 8, 1.5, corner + 10)), Vector3.new(3, 3, 3), WOOD, Enum.Material.WoodPlanks)
+block(sewer, CFrame.new(at(-corner + 8, 4.5, corner + 10)) * CFrame.Angles(0, 0.4, 0), Vector3.new(3, 3, 3), WOOD, Enum.Material.WoodPlanks)
+local valvePipe = at(-HUB + 7, 0, HUB - 7)
+pillar(sewer, valvePipe, HUB_HEIGHT, 3.2, RUST, Enum.Material.CorrodedMetal)
+local wheelCenter = valvePipe + Vector3.new(1.9, 5, 0)
+part({
+	Name = "ValveWheel",
+	Shape = Enum.PartType.Cylinder,
+	Size = Vector3.new(0.3, 3, 3),
+	CFrame = CFrame.new(wheelCenter),
+	Color = Color3.fromRGB(180, 40, 40),
+	Material = Enum.Material.Metal,
+	Parent = sewer,
+})
+rat(at(corner + 2, 0, -corner + 12), Vector3.new(-1, 0, 0))
+rat(at(-corner + 10, 0, corner - 3), Vector3.new(0, 0, -1))
 
 --------------------------------------------------------------------------------
 -- Trees, bushes, flowers, grass and rocks
@@ -977,14 +1466,14 @@ end
 
 -- A ring of trees around the play area, then a few closer in. The closer ones are
 -- never pines and stay well away from the paths, so they don't block the view.
-for _ = 1, 38 do
-	local spot = randomSpot(75, 150, 6)
+for _ = 1, 42 do
+	local spot = randomSpot(150, 260, 6)
 	if spot then
 		plantTree(spot, rng:NextNumber(18, 28), true)
 	end
 end
-for _ = 1, 10 do
-	local spot = randomSpot(35, 75, 12)
+for _ = 1, 14 do
+	local spot = randomSpot(45, 140, 12)
 	if spot then
 		plantTree(spot, rng:NextNumber(15, 21), false)
 	end
@@ -1002,30 +1491,34 @@ end
 
 -- Bushes around the buildings and signs.
 for _, spot in {
-	Vector3.new(-73, 0, -6),
-	Vector3.new(-73, 0, 6),
-	Vector3.new(-64, 0, -15),
-	Vector3.new(-54, 0, -15),
-	Vector3.new(-64, 0, 15),
+	Vector3.new(shopX - 13, 0, -6),
+	Vector3.new(shopX - 13, 0, 6),
+	Vector3.new(shopX - 4, 0, -15),
+	Vector3.new(shopX + 6, 0, -15),
+	Vector3.new(shopX - 4, 0, 15),
 	Vector3.new(-31, 0, titleZ),
 	Vector3.new(31, 0, titleZ),
 	Vector3.new(-22, 0, titleZ - 2),
 	Vector3.new(22, 0, titleZ - 2),
-	Vector3.new(70, 0, 13),
-	Vector3.new(70, 0, -13),
-	Vector3.new(78, 0, 0),
-	Vector3.new(50, 0, 13),
-	Vector3.new(50, 0, -13),
-	Vector3.new(-30, 0, 68),
-	Vector3.new(30, 0, 68),
+	Vector3.new(shrineCenter.X + 10, 0, 13),
+	Vector3.new(shrineCenter.X + 10, 0, -13),
+	Vector3.new(shrineCenter.X + 18, 0, 0),
+	Vector3.new(shrineCenter.X - 10, 0, 13),
+	Vector3.new(shrineCenter.X - 10, 0, -13),
+	Vector3.new(-30, 0, pondCenter.Z + 6),
+	Vector3.new(30, 0, pondCenter.Z + 6),
+	(CFrame.lookAt(hatcheryCenter, PLAZA_CENTER) * CFrame.new(-20, 0, 9)).Position,
+	(CFrame.lookAt(hatcheryCenter, PLAZA_CENTER) * CFrame.new(20, 0, 9)).Position,
+	(CFrame.lookAt(hatcheryCenter, PLAZA_CENTER) * CFrame.new(-13, 0, 14)).Position,
+	(CFrame.lookAt(hatcheryCenter, PLAZA_CENTER) * CFrame.new(13, 0, 14)).Position,
 } do
-	bush(nature, spot + Vector3.new(0, FLOOR, 0), rng:NextNumber(3.5, 5))
+	bush(nature, Vector3.new(spot.X, FLOOR, spot.Z), rng:NextNumber(3.5, 5))
 end
 
 -- Flower patches: each patch is one kind and color of flower, like a real flower bed.
 local flowers = group("Flowers", nature)
-for _ = 1, 15 do
-	local patch = randomSpot(24, 90, 2)
+for _ = 1, 18 do
+	local patch = randomSpot(30, 170, 2)
 	if patch then
 		local isTulip = rng:NextNumber() < 0.4
 		local color = if isTulip then pick(TULIP_COLORS) else pick(DAISY_COLORS)
@@ -1043,16 +1536,16 @@ end
 
 -- Grass tufts scattered everywhere.
 local tufts = group("GrassTufts", nature)
-for _ = 1, 80 do
-	local spot = randomSpot(12, 170, 0.5)
+for _ = 1, 90 do
+	local spot = randomSpot(12, 280, 0.5)
 	if spot then
 		grassTuft(tufts, spot, rng:NextNumber(0.9, 1.8))
 	end
 end
 
 -- A few boulders, some with little plants around them.
-for _ = 1, 10 do
-	local spot = randomSpot(40, 140, 3)
+for _ = 1, 14 do
+	local spot = randomSpot(50, 240, 3)
 	if spot then
 		boulder(nature, spot, rng:NextNumber(3, 6), rng:NextNumber() < 0.3)
 		grassTuft(nature, spot + Vector3.new(rng:NextNumber(2, 3.5), 0, rng:NextNumber(-2, 2)), 1.4)
@@ -1060,10 +1553,22 @@ for _ = 1, 10 do
 end
 
 --------------------------------------------------------------------------------
--- Put it in the world and start the crystal moving
+-- Put it in the world and start things moving
 --------------------------------------------------------------------------------
 
 map.Parent = workspace
+
+-- The eggs gently bob up and down, each a little after the last.
+for i, egg in bobbingEggs do
+	local bob = TweenService:Create(
+		egg,
+		TweenInfo.new(1.4, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+		{ CFrame = egg.CFrame + Vector3.new(0, 0.6, 0) }
+	)
+	task.delay(i * 0.35, function()
+		bob:Play()
+	end)
+end
 
 -- Bob up and down.
 TweenService:Create(

@@ -1,6 +1,6 @@
 -- Client side of the simulator: the coin and Flush counters, the shop, the rebirth
--- menu, pop-up messages, sounds, the plunger animation and the glowing guide to
--- the sell pad. The server owns all the numbers; this script only shows them and
+-- and pets menus, egg hatching, pets following players, pop-up messages, sounds,
+-- the plunger animation and the glowing guide to the sell pad. The server owns all the numbers; this script only shows them and
 -- asks the server when the player wants to buy something.
 
 local Players = game:GetService("Players")
@@ -8,6 +8,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local ProximityPromptService = game:GetService("ProximityPromptService")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
 
 local player = Players.LocalPlayer
 
@@ -54,6 +56,9 @@ end
 
 local Config = requireShared("Config")
 local Format = requireShared("Format")
+if not Config.Pets then
+	showSetupProblem("Config is an older version. Paste in the newest Config code too.")
+end
 
 -- The server makes the Remotes folder, so if it never shows up, GameServer isn't running.
 local Remotes = ReplicatedStorage:WaitForChild("Remotes", 10)
@@ -65,6 +70,11 @@ end
 local buyRemote = Remotes:WaitForChild("BuyItem")
 local rebirthRemote = Remotes:WaitForChild("Rebirth")
 local notifyRemote = Remotes:WaitForChild("Notify")
+local petRemote = Remotes:WaitForChild("PetAction", 10)
+local hatchedRemote = Remotes:WaitForChild("Hatched", 10)
+if not (petRemote and hatchedRemote) then
+	showSetupProblem("GameServer is an older version. Paste in the newest GameServer code too.")
+end
 
 local FONT = Enum.Font.FredokaOne
 local WHITE = Color3.new(1, 1, 1)
@@ -77,6 +87,7 @@ local BLUE = Color3.fromRGB(60, 150, 255)
 local PURPLE = Color3.fromRGB(160, 80, 255)
 local GRAY = Color3.fromRGB(95, 100, 115)
 local GOLD = Color3.fromRGB(255, 205, 60)
+local ORANGE = Color3.fromRGB(255, 150, 50)
 
 -- Reads one of the numbers the server puts on the player (Coins, Flushes, ...).
 local function stat(name: string): number
@@ -288,7 +299,7 @@ end
 local sidebar = make("Frame", {
 	AnchorPoint = Vector2.new(0, 0.5),
 	Position = UDim2.new(0, 16, 0.5, 0),
-	Size = UDim2.fromOffset(210, 260),
+	Size = UDim2.fromOffset(210, 316),
 	BackgroundTransparency = 1,
 	Parent = gui,
 }, {
@@ -337,7 +348,8 @@ local flushText, flushFill = statBox(BLUE, 2)
 local rebirthsText = statBox(PURPLE, 3)
 
 local shopButton = button("🛒 Shop", GREEN, { LayoutOrder = 4, Size = UDim2.new(1, 0, 0, 48), Parent = sidebar })
-local rebirthButton = button("⭐ Rebirth", PURPLE, { LayoutOrder = 5, Size = UDim2.new(1, 0, 0, 48), Parent = sidebar })
+local petsButton = button("🐾 Pets", ORANGE, { LayoutOrder = 5, Size = UDim2.new(1, 0, 0, 48), Parent = sidebar })
+local rebirthButton = button("⭐ Rebirth", PURPLE, { LayoutOrder = 6, Size = UDim2.new(1, 0, 0, 48), Parent = sidebar })
 
 --------------------------------------------------------------------------------
 -- Pop-up windows
@@ -577,12 +589,567 @@ local function refreshRebirth()
 end
 
 --------------------------------------------------------------------------------
+-- Pet models (built from parts, so nothing needs uploading)
+--------------------------------------------------------------------------------
+
+local BALL = Enum.PartType.Ball
+local BLOCK = Enum.PartType.Block
+local CYLINDER = Enum.PartType.Cylinder
+local FACE_FORWARD = CFrame.Angles(0, math.rad(90), 0) -- turns a cylinder to face the front
+local STAND_UP = CFrame.Angles(0, 0, math.rad(90)) -- turns a cylinder to stand upright
+local PET_BLACK = Color3.fromRGB(20, 20, 25)
+local SUIT = Color3.fromRGB(38, 38, 48)
+
+-- Builds a pet facing -Z, centered on an invisible root part.
+local function buildPet(name: string): Model
+	local info = Config.Pets[name]
+	local scale = (info and info.Scale) or 1
+	local model = Instance.new("Model")
+	model.Name = name
+
+	local function add(shape: Enum.PartType, size: Vector3, position: Vector3, color: Color3, material: Enum.Material?, turn: CFrame?): Part
+		local piece = Instance.new("Part")
+		piece.Shape = shape
+		piece.Size = size * scale
+		piece.CFrame = CFrame.new(position * scale) * (turn or CFrame.identity)
+		piece.Color = color
+		piece.Material = material or Enum.Material.SmoothPlastic
+		piece.Anchored = true
+		piece.CanCollide = false
+		piece.CanQuery = false
+		piece.CanTouch = false
+		piece.TopSurface = Enum.SurfaceType.Smooth
+		piece.BottomSurface = Enum.SurfaceType.Smooth
+		piece.Parent = model
+		return piece
+	end
+	local function eyes(y: number, z: number, spread: number, size: number, color: Color3?)
+		for _, x in { -spread, spread } do
+			add(BALL, Vector3.one * size, Vector3.new(x, y, z), color or PET_BLACK)
+		end
+	end
+	-- The body Cameraman, Speakerman and TV Man share: a little suit and tie.
+	local function suit(tie: Color3)
+		add(BLOCK, Vector3.new(1.2, 1.3, 0.75), Vector3.new(0, -0.35, 0), SUIT)
+		add(BLOCK, Vector3.new(0.4, 0.55, 0.05), Vector3.new(0, -0.05, -0.39), Color3.new(1, 1, 1))
+		add(BLOCK, Vector3.new(0.14, 0.5, 0.06), Vector3.new(0, -0.1, -0.42), tie)
+		for _, x in { -0.72, 0.72 } do
+			add(BLOCK, Vector3.new(0.3, 1.05, 0.35), Vector3.new(x, -0.4, 0), SUIT)
+		end
+		for _, x in { -0.28, 0.28 } do
+			add(BLOCK, Vector3.new(0.4, 0.55, 0.45), Vector3.new(x, -1.25, 0), SUIT)
+		end
+	end
+
+	local root = add(BLOCK, Vector3.one * 0.4, Vector3.zero, PET_BLACK)
+	root.Name = "Root"
+	root.Transparency = 1
+	model.PrimaryPart = root
+
+	if name == "Rubber Ducky" then
+		local yellow = Color3.fromRGB(255, 215, 40)
+		add(BALL, Vector3.one * 1.8, Vector3.new(0, 0, 0.1), yellow)
+		add(BALL, Vector3.one * 1.2, Vector3.new(0, 0.95, -0.45), yellow)
+		add(BALL, Vector3.one * 0.6, Vector3.new(0, 0.35, 0.95), yellow)
+		add(BLOCK, Vector3.new(0.55, 0.22, 0.55), Vector3.new(0, 0.85, -1.1), Color3.fromRGB(255, 140, 30))
+		eyes(1.15, -0.95, 0.28, 0.2)
+	elseif name == "Soap Bunny" then
+		local fur = Color3.fromRGB(250, 220, 235)
+		local pink = Color3.fromRGB(255, 150, 190)
+		add(BALL, Vector3.one * 1.6, Vector3.new(0, 0, 0.15), fur)
+		add(BALL, Vector3.one * 1.2, Vector3.new(0, 0.9, -0.35), fur)
+		for _, side in { -1, 1 } do
+			local tilt = CFrame.Angles(0, 0, -0.15 * side)
+			add(BLOCK, Vector3.new(0.32, 1.1, 0.18), Vector3.new(0.28 * side, 1.85, -0.3), fur, nil, tilt)
+			add(BLOCK, Vector3.new(0.16, 0.8, 0.05), Vector3.new(0.28 * side, 1.85, -0.4), pink, nil, tilt)
+		end
+		eyes(1, -0.88, 0.25, 0.18)
+		add(BALL, Vector3.one * 0.16, Vector3.new(0, 0.82, -0.95), pink)
+		-- soap bubbles
+		add(BALL, Vector3.one * 0.5, Vector3.new(0.85, 1.5, 0.3), Color3.fromRGB(200, 235, 255), Enum.Material.Glass).Transparency = 0.5
+		add(BALL, Vector3.one * 0.35, Vector3.new(-0.75, 1.9, 0.5), Color3.fromRGB(200, 235, 255), Enum.Material.Glass).Transparency = 0.5
+	elseif name == "Plunger Pup" then
+		local fur = Color3.fromRGB(175, 120, 70)
+		add(BALL, Vector3.one * 1.5, Vector3.new(0, 0, 0.3), fur)
+		add(BALL, Vector3.one * 1.25, Vector3.new(0, 0.75, -0.5), fur)
+		add(BALL, Vector3.one * 0.55, Vector3.new(0, 0.6, -1.1), Color3.fromRGB(215, 170, 120))
+		add(BALL, Vector3.one * 0.2, Vector3.new(0, 0.72, -1.36), PET_BLACK)
+		for _, side in { -1, 1 } do
+			add(BLOCK, Vector3.new(0.3, 0.7, 0.15), Vector3.new(0.62 * side, 0.6, -0.45), Color3.fromRGB(110, 70, 40))
+		end
+		eyes(0.95, -1.02, 0.26, 0.17)
+		add(BALL, Vector3.one * 0.35, Vector3.new(0, 0.35, 1.05), fur)
+		-- a little plunger hat
+		add(CYLINDER, Vector3.new(0.35, 0.9, 0.9), Vector3.new(0, 1.45, -0.5), Color3.fromRGB(230, 60, 60), Enum.Material.Rubber, STAND_UP)
+		add(CYLINDER, Vector3.new(0.9, 0.15, 0.15), Vector3.new(0, 2.05, -0.5), Color3.fromRGB(150, 100, 60), Enum.Material.Wood, STAND_UP)
+	elseif name == "Sewer Rat" then
+		local fur = Color3.fromRGB(135, 130, 135)
+		local pink = Color3.fromRGB(240, 160, 170)
+		add(BALL, Vector3.one * 1.4, Vector3.new(0, 0, 0.2), fur)
+		add(BALL, Vector3.one * 0.95, Vector3.new(0, 0.35, -0.75), fur)
+		add(BALL, Vector3.one * 0.45, Vector3.new(0, 0.25, -1.2), fur)
+		add(BALL, Vector3.one * 0.16, Vector3.new(0, 0.3, -1.42), pink)
+		for _, side in { -1, 1 } do
+			add(CYLINDER, Vector3.new(0.08, 0.55, 0.55), Vector3.new(0.35 * side, 0.85, -0.65), pink, nil, FACE_FORWARD)
+		end
+		eyes(0.5, -1.12, 0.2, 0.14, Color3.fromRGB(200, 30, 30))
+		add(CYLINDER, Vector3.new(1.5, 0.12, 0.12), Vector3.new(0, 0.2, 1.3), pink, nil, FACE_FORWARD * CFrame.Angles(0, 0, 0.35))
+	elseif name == "Cameraman" or name == "Titan Cameraman" then
+		local titan = name == "Titan Cameraman"
+		local gold = Color3.fromRGB(255, 195, 50)
+		local headColor = if titan then gold else Color3.fromRGB(60, 60, 66)
+		local headMaterial = if titan then Enum.Material.Foil else Enum.Material.SmoothPlastic
+		suit(if titan then gold else Color3.fromRGB(200, 30, 40))
+		add(BLOCK, Vector3.new(1.3, 0.95, 1), Vector3.new(0, 0.75, 0), headColor, headMaterial)
+		add(BLOCK, Vector3.new(0.6, 0.15, 0.2), Vector3.new(0, 1.3, 0), headColor, headMaterial)
+		add(CYLINDER, Vector3.new(0.45, 0.75, 0.75), Vector3.new(0, 0.75, -0.7), Color3.fromRGB(150, 150, 160), Enum.Material.Metal, FACE_FORWARD)
+		add(
+			CYLINDER,
+			Vector3.new(0.06, 0.55, 0.55),
+			Vector3.new(0, 0.75, -0.94),
+			if titan then Color3.fromRGB(80, 220, 255) else PET_BLACK,
+			if titan then Enum.Material.Neon else Enum.Material.Glass,
+			FACE_FORWARD
+		)
+		add(BALL, Vector3.one * 0.18, Vector3.new(0.45, 1.1, -0.5), Color3.fromRGB(255, 40, 40), Enum.Material.Neon)
+		if titan then
+			for _, side in { -1, 1 } do
+				add(BLOCK, Vector3.new(0.5, 0.25, 0.8), Vector3.new(0.72 * side, 0.2, 0), gold, Enum.Material.Foil)
+			end
+		end
+	elseif name == "Speakerman" then
+		suit(Color3.fromRGB(40, 110, 230))
+		add(BLOCK, Vector3.new(1.25, 1.45, 0.95), Vector3.new(0, 0.95, 0), Color3.fromRGB(25, 25, 28))
+		for _, woofer in { { y = 1.25, size = 0.85 }, { y = 0.6, size = 0.5 } } do
+			add(CYLINDER, Vector3.new(0.08, woofer.size, woofer.size), Vector3.new(0, woofer.y, -0.49), Color3.fromRGB(95, 95, 100), Enum.Material.Metal, FACE_FORWARD)
+			add(CYLINDER, Vector3.new(0.1, woofer.size * 0.35, woofer.size * 0.35), Vector3.new(0, woofer.y, -0.53), PET_BLACK, nil, FACE_FORWARD)
+		end
+	elseif name == "TV Man" then
+		suit(Color3.fromRGB(140, 60, 220))
+		add(BLOCK, Vector3.new(1.7, 1.15, 0.9), Vector3.new(0, 0.85, 0), Color3.fromRGB(70, 70, 76))
+		add(BLOCK, Vector3.new(1.4, 0.85, 0.05), Vector3.new(0, 0.85, -0.46), Color3.fromRGB(80, 200, 255), Enum.Material.Neon)
+		for _, side in { -1, 1 } do
+			add(CYLINDER, Vector3.new(0.8, 0.07, 0.07), Vector3.new(0.3 * side, 1.75, 0), PET_BLACK, nil, CFrame.Angles(0, 0, math.rad(90 - 25 * side)))
+		end
+	end
+
+	if info and info.Rarity == "Legendary" then
+		Instance.new("Sparkles").Parent = root
+	end
+	return model
+end
+
+local function buildEggModel(color: Color3): Part
+	local egg = Instance.new("Part")
+	egg.Size = Vector3.new(3, 3.9, 3)
+	egg.Color = color
+	egg.Anchored = true
+	local mesh = Instance.new("SpecialMesh")
+	mesh.MeshType = Enum.MeshType.Sphere -- stretches to the part's size, making an egg shape
+	mesh.Parent = egg
+	return egg
+end
+
+-- Reads a player's pet list, which the server stores on them as text.
+local function readPets(owner: Player): { any }
+	local raw = owner:GetAttribute("Pets")
+	if type(raw) ~= "string" then
+		return {}
+	end
+	local ok, pets = pcall(HttpService.JSONDecode, HttpService, raw)
+	return if ok and type(pets) == "table" then pets else {}
+end
+
+-- 1.5 -> "1.5", 2 -> "2"
+local function formatMultiplier(value: number): string
+	local text = string.format("%.2f", value):gsub("%.?0+$", "")
+	return text
+end
+
+--------------------------------------------------------------------------------
+-- Pets menu
+--------------------------------------------------------------------------------
+
+local petsWindow = makeWindow("🐾 Pets", ORANGE, Vector2.new(560, 420))
+
+local petsHeader = textLabel({
+	Position = UDim2.fromOffset(16, 58),
+	Size = UDim2.new(1, -180, 0, 28),
+	TextColor3 = SOFT_WHITE,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	Parent = petsWindow,
+})
+local equipBestButton = button("⭐ Equip Best", GREEN, {
+	AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(1, -16, 0, 54),
+	Size = UDim2.fromOffset(150, 36),
+	Parent = petsWindow,
+})
+local petsList = make("ScrollingFrame", {
+	Position = UDim2.fromOffset(16, 98),
+	Size = UDim2.new(1, -32, 1, -114),
+	AutomaticCanvasSize = Enum.AutomaticSize.Y,
+	CanvasSize = UDim2.new(),
+	BackgroundTransparency = 1,
+	BorderSizePixel = 0,
+	ScrollBarThickness = 6,
+	Parent = petsWindow,
+}, {
+	make("UIGridLayout", {
+		CellSize = UDim2.fromOffset(160, 112),
+		CellPadding = UDim2.fromOffset(8, 8),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	}),
+})
+local noPetsText = textLabel({
+	Position = UDim2.fromOffset(16, 150),
+	Size = UDim2.new(1, -32, 0, 60),
+	Text = "No pets yet! Hatch eggs at the 🥚 Egg Hatchery.",
+	TextColor3 = SOFT_WHITE,
+	Parent = petsWindow,
+})
+
+local confirmingDelete: Instance? = nil
+
+local function refreshPetsMenu()
+	for _, child in petsList:GetChildren() do
+		if child:IsA("Frame") then
+			child:Destroy()
+		end
+	end
+
+	local pets = readPets(player)
+	local equipped = 0
+	for _, pet in pets do
+		if pet.Equipped then
+			equipped += 1
+		end
+	end
+	petsHeader.Text = ("Equipped %d/%d  •  Boost x%s  •  %d/%d pets"):format(
+		equipped,
+		Config.MaxEquippedPets,
+		formatMultiplier(Config.getPetMultiplier(pets)),
+		#pets,
+		Config.MaxPets
+	)
+	noPetsText.Visible = #pets == 0
+
+	-- Equipped pets first, then the strongest.
+	local order = {}
+	for index, pet in pets do
+		if Config.Pets[pet.Name] then
+			table.insert(order, index)
+		end
+	end
+	table.sort(order, function(a, b)
+		local petA, petB = pets[a], pets[b]
+		if petA.Equipped ~= petB.Equipped then
+			return petA.Equipped == true
+		end
+		local boostA, boostB = Config.Pets[petA.Name].Boost, Config.Pets[petB.Name].Boost
+		if boostA ~= boostB then
+			return boostA > boostB
+		end
+		return a < b
+	end)
+
+	for rank, index in order do
+		local pet = pets[index]
+		local info = Config.Pets[pet.Name]
+		local rarityColor = Config.Rarities[info.Rarity]
+		local cell = make("Frame", {
+			BackgroundColor3 = PANEL_LIGHT,
+			LayoutOrder = rank,
+			Parent = petsList,
+		}, {
+			rounded(10),
+			border(if pet.Equipped then GREEN else rarityColor, if pet.Equipped then 3 else 1.5),
+		})
+		textLabel({
+			Position = UDim2.fromOffset(8, 6),
+			Size = UDim2.new(1, -16, 0, 26),
+			Text = info.Icon .. " " .. pet.Name,
+			TextColor3 = rarityColor,
+			Parent = cell,
+		})
+		textLabel({
+			Position = UDim2.fromOffset(8, 34),
+			Size = UDim2.new(1, -16, 0, 20),
+			Text = ("%s  •  +%d%%"):format(info.Rarity:upper(), math.floor(info.Boost * 100 + 0.5)),
+			TextColor3 = SOFT_WHITE,
+			Parent = cell,
+		})
+
+		local equipButton = button(if pet.Equipped then "Unequip" else "Equip", if pet.Equipped then GRAY else GREEN, {
+			Position = UDim2.fromOffset(8, 64),
+			Size = UDim2.new(1, -62, 0, 38),
+			Parent = cell,
+		})
+		equipButton.Activated:Connect(function()
+			askServer(petRemote, if pet.Equipped then "Unequip" else "Equip", index, pet.Name)
+		end)
+
+		local deleteButton = button("🗑", RED, {
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.new(1, -8, 0, 64),
+			Size = UDim2.fromOffset(44, 38),
+			Parent = cell,
+		})
+		deleteButton.Activated:Connect(function()
+			-- Press twice to delete, so you can't lose a pet by accident.
+			if confirmingDelete ~= deleteButton then
+				confirmingDelete = deleteButton
+				deleteButton.Text = "Sure?"
+				task.delay(2, function()
+					if confirmingDelete == deleteButton then
+						confirmingDelete = nil
+						deleteButton.Text = "🗑"
+					end
+				end)
+				return
+			end
+			confirmingDelete = nil
+			askServer(petRemote, "Delete", index, pet.Name)
+		end)
+	end
+end
+
+equipBestButton.Activated:Connect(function()
+	askServer(petRemote, "EquipBest")
+end)
+
+--------------------------------------------------------------------------------
+-- Hatching animation
+--------------------------------------------------------------------------------
+
+local hatchOverlay = make("Frame", {
+	Size = UDim2.fromScale(1, 1),
+	BackgroundColor3 = Color3.new(0, 0, 0),
+	BackgroundTransparency = 1,
+	Visible = false,
+	ZIndex = 20,
+	Parent = gui,
+})
+local hatchView = make("ViewportFrame", {
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.4),
+	Size = UDim2.fromScale(0.5, 0.5),
+	BackgroundTransparency = 1,
+	Ambient = Color3.fromRGB(160, 160, 170),
+	LightColor = Color3.new(1, 1, 1),
+	LightDirection = Vector3.new(-1, -2, 1),
+	ZIndex = 21,
+	Parent = hatchOverlay,
+}, {
+	make("UIAspectRatioConstraint", { AspectRatio = 1 }),
+})
+local hatchCamera = make("Camera", {
+	FieldOfView = 40,
+	CFrame = CFrame.lookAt(Vector3.new(0, 0.3, -8), Vector3.zero),
+	Parent = hatchView,
+})
+hatchView.CurrentCamera = hatchCamera
+local hatchTitle = textLabel({
+	AnchorPoint = Vector2.new(0.5, 0),
+	Position = UDim2.fromScale(0.5, 0.66),
+	Size = UDim2.fromScale(0.9, 0.08),
+	TextStrokeTransparency = 0.3,
+	ZIndex = 21,
+	Parent = hatchOverlay,
+})
+local hatchInfo = textLabel({
+	AnchorPoint = Vector2.new(0.5, 0),
+	Position = UDim2.fromScale(0.5, 0.75),
+	Size = UDim2.fromScale(0.9, 0.05),
+	TextColor3 = SOFT_WHITE,
+	ZIndex = 21,
+	Parent = hatchOverlay,
+})
+local hatchFlash = make("Frame", {
+	Size = UDim2.fromScale(1, 1),
+	BackgroundColor3 = Color3.new(1, 1, 1),
+	BackgroundTransparency = 1,
+	ZIndex = 22,
+	Parent = hatchOverlay,
+})
+
+local hatching = false
+local function playHatch(eggName: string, petName: string)
+	while hatching do
+		task.wait(0.1)
+	end
+	hatching = true
+	local egg = Config.getEgg(eggName)
+	local info = Config.Pets[petName]
+	for _, window in windows do
+		window.Visible = false
+	end
+
+	hatchOverlay.Visible = true
+	tween(hatchOverlay, 0.3, { BackgroundTransparency = 0.35 })
+	hatchTitle.Text = ("Hatching %s..."):format(eggName)
+	hatchTitle.TextColor3 = WHITE
+	hatchInfo.Text = ""
+
+	-- Shake the egg harder and harder...
+	local eggModel = buildEggModel(if egg then egg.Color else WHITE)
+	eggModel.Parent = hatchView
+	local started = os.clock()
+	while os.clock() - started < 1.8 do
+		local t = os.clock() - started
+		eggModel.CFrame = CFrame.Angles(0, 0, math.sin(t * (10 + t * 14)) * 0.08 * (1 + t * 1.5))
+		RunService.RenderStepped:Wait()
+	end
+	eggModel:Destroy()
+
+	-- ...then pop! Show the pet spinning around.
+	hatchFlash.BackgroundTransparency = 0
+	tween(hatchFlash, 0.5, { BackgroundTransparency = 1 })
+	playSound(SPLASH_SOUND, 0.6, 1.6)
+	playSound(PING_SOUND, 0.5)
+	local pet = buildPet(petName)
+	pet.Parent = hatchView
+	if info then
+		hatchTitle.Text = ("You hatched %s %s!"):format(info.Icon, petName)
+		hatchTitle.TextColor3 = Config.Rarities[info.Rarity]
+		hatchInfo.Text = ("%s  •  +%d%% Flushes"):format(info.Rarity:upper(), math.floor(info.Boost * 100 + 0.5))
+	end
+	started = os.clock()
+	while os.clock() - started < 2.2 do
+		pet:PivotTo(CFrame.Angles(0, (os.clock() - started) * 2, 0))
+		RunService.RenderStepped:Wait()
+	end
+
+	pet:Destroy()
+	tween(hatchOverlay, 0.25, { BackgroundTransparency = 1 })
+	task.wait(0.25)
+	hatchOverlay.Visible = false
+	hatching = false
+end
+
+hatchedRemote.OnClientEvent:Connect(function(eggName, petName)
+	task.spawn(playHatch, eggName, petName)
+end)
+
+--------------------------------------------------------------------------------
+-- Pets following players around (everyone's pets are drawn on your screen)
+--------------------------------------------------------------------------------
+
+local petFolder = Instance.new("Folder")
+petFolder.Name = "PetVisuals"
+petFolder.Parent = workspace
+
+type PetVisual = { key: string, models: { Model }, spots: { CFrame } }
+local petVisuals: { [Player]: PetVisual } = {}
+
+local function removeFollowers(owner: Player)
+	local visual = petVisuals[owner]
+	if visual then
+		for _, model in visual.models do
+			model:Destroy()
+		end
+	end
+	petVisuals[owner] = nil
+end
+
+local function refreshFollowers(owner: Player)
+	local names = {}
+	for _, pet in readPets(owner) do
+		if pet.Equipped and Config.Pets[pet.Name] then
+			table.insert(names, pet.Name)
+		end
+	end
+	local key = table.concat(names, ",")
+	local visual = petVisuals[owner]
+	if visual and visual.key == key then
+		return
+	end
+
+	removeFollowers(owner)
+	local models = {}
+	for _, name in names do
+		local model = buildPet(name)
+		model.Parent = petFolder
+		table.insert(models, model)
+	end
+	petVisuals[owner] = { key = key, models = models, spots = {} }
+end
+
+local function watchPets(owner: Player)
+	owner:GetAttributeChangedSignal("Pets"):Connect(function()
+		refreshFollowers(owner)
+	end)
+	refreshFollowers(owner)
+end
+Players.PlayerAdded:Connect(watchPets)
+for _, other in Players:GetPlayers() do
+	watchPets(other)
+end
+Players.PlayerRemoving:Connect(removeFollowers)
+
+RunService.RenderStepped:Connect(function(deltaTime)
+	local now = os.clock()
+	local smoothing = 1 - math.exp(-deltaTime * 8)
+	for owner, visual in petVisuals do
+		local character = owner.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+		local count = #visual.models
+		for i, model in visual.models do
+			if root then
+				-- Line up behind the player, bobbing up and down.
+				local across = (i - (count + 1) / 2) * 3.5
+				local target = root.CFrame * CFrame.new(across, -1 + math.sin(now * 3 + i) * 0.35, 5 + math.abs(across) * 0.3)
+				local spot = visual.spots[i]
+				-- Glide toward the target, or jump straight there after a teleport.
+				spot = if spot and (spot.Position - target.Position).Magnitude < 60 then spot:Lerp(target, smoothing) else target
+				visual.spots[i] = spot
+				model:PivotTo(spot)
+			end
+			local shouldShow = root ~= nil
+			if (model.Parent ~= nil) ~= shouldShow then
+				model.Parent = if shouldShow then petFolder else nil
+			end
+		end
+	end
+end)
+
+--------------------------------------------------------------------------------
 -- Keeping everything up to date
 --------------------------------------------------------------------------------
 
--- A glowing line from you to the sell pad while your tank is full.
+-- Finds the closest sell pad (there's one up top and one in the Sewers).
+-- Searching the whole map is slow, so the pads are remembered after the first search.
+local knownSellPads: { BasePart } = {}
+local function nearestSellPad(position: Vector3): BasePart?
+	local pads = {}
+	for _, pad in knownSellPads do
+		if pad.Parent then
+			table.insert(pads, pad)
+		end
+	end
+	if #pads == 0 then
+		for _, descendant in workspace:GetDescendants() do
+			if descendant.Name == "SellPad" and descendant:IsA("BasePart") then
+				table.insert(pads, descendant)
+			end
+		end
+	end
+	knownSellPads = pads
+
+	local nearest, nearestDistance = nil, math.huge
+	for _, pad in pads do
+		local distance = (pad.Position - position).Magnitude
+		if distance < nearestDistance then
+			nearest, nearestDistance = pad, distance
+		end
+	end
+	return nearest
+end
+
+-- A glowing line from you to the nearest sell pad while your tank is full.
 local sellGuide: Beam? = nil
-local padAttachment: Attachment? = nil
+local padAttachments: { [BasePart]: Attachment } = {}
+local tankFull = false
 local function updateSellGuide(show: boolean)
 	local guide = sellGuide
 	if not show then
@@ -593,20 +1160,22 @@ local function updateSellGuide(show: boolean)
 	end
 
 	local character = player.Character
-	local root = character and character:FindFirstChild("HumanoidRootPart")
-	-- Searching the whole map is slow, so reuse the pad we found last time.
-	local target = padAttachment
-	local pad = if target and target.Parent then target.Parent else workspace:FindFirstChild("SellPad", true)
-	if not (root and pad and pad:IsA("BasePart")) then
+	local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not root then
+		return
+	end
+	local pad = nearestSellPad(root.Position)
+	if not pad then
 		return
 	end
 
+	local target = padAttachments[pad]
 	if not target or target.Parent ~= pad then
 		target = Instance.new("Attachment")
 		target.Name = "SellGuideTarget"
 		target.Parent = pad
 		target.WorldPosition = pad.Position + Vector3.new(0, 1, 0)
-		padAttachment = target
+		padAttachments[pad] = target
 	end
 
 	if not guide or guide.Parent ~= root then
@@ -650,8 +1219,20 @@ local function refreshSidebar()
 		else ("🚽 %s / %s"):format(Format.number(flushes), Format.number(capacity))
 	tween(flushFill, 0.15, { Size = UDim2.fromScale(if capacity > 0 then math.clamp(flushes / capacity, 0, 1) else 0, 1) })
 	flushFill.BackgroundColor3 = if full then RED else BLUE
-	updateSellGuide(full and player:GetAttribute("Loaded") == true)
+	tankFull = full and player:GetAttribute("Loaded") == true
+	updateSellGuide(tankFull)
+	petsButton.Text = "🐾 Pets  x" .. formatMultiplier(player:GetAttribute("PetMultiplier") or 1)
 end
+
+-- Keep the guide pointing at the closest pad as you move around (or go down to the Sewers).
+task.spawn(function()
+	while true do
+		task.wait(0.5)
+		if tankFull then
+			updateSellGuide(true)
+		end
+	end
+end)
 
 local function refreshAll()
 	refreshSidebar()
@@ -669,10 +1250,13 @@ player.AttributeChanged:Connect(function(name)
 			playSound(SPLASH_SOUND, 0.35, 1.1 + math.random() * 0.4)
 		end
 		lastFlushes = flushes
+	elseif name == "Pets" then
+		refreshPetsMenu()
 	end
 	refreshAll()
 end)
 refreshAll()
+refreshPetsMenu()
 
 notifyRemote.OnClientEvent:Connect(showNotice)
 
@@ -681,6 +1265,9 @@ shopButton.Activated:Connect(function()
 end)
 rebirthButton.Activated:Connect(function()
 	toggleWindow(rebirthWindow)
+end)
+petsButton.Activated:Connect(function()
+	toggleWindow(petsWindow)
 end)
 
 -- The map's shop counter and rebirth toilet have "Press E" prompts that open these menus.

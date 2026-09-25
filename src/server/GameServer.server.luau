@@ -1,9 +1,12 @@
 -- Server side of the simulator: loads and saves player data, and handles plunger
--- clicks, selling, shop purchases and rebirths. Every change to a player's coins
--- happens here, never on the client, so exploiters can't give themselves money.
+-- clicks, selling, the shop, rebirths, egg hatching, pets and the Sewers. Every
+-- change to a player's coins happens here, never on the client, so exploiters
+-- can't give themselves money.
 
 local DataStoreService = game:GetService("DataStoreService")
+local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
+local ProximityPromptService = game:GetService("ProximityPromptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local StarterGui = game:GetService("StarterGui")
@@ -57,6 +60,9 @@ end
 
 local Config = requireShared("Config")
 local Format = requireShared("Format")
+if not Config.Pets then
+	showSetupProblem('Config is an old version. Paste in the newest Config code (it has pets in it).')
+end
 
 -- Saving only works in a published game. To test saving in Studio, turn on
 -- Game Settings > Security > "Enable Studio Access to API Services".
@@ -84,7 +90,9 @@ end
 
 local buyRemote = makeRemote("RemoteFunction", "BuyItem")
 local rebirthRemote = makeRemote("RemoteFunction", "Rebirth")
+local petRemote = makeRemote("RemoteFunction", "PetAction")
 local notifyRemote = makeRemote("RemoteEvent", "Notify")
+local hatchedRemote = makeRemote("RemoteEvent", "Hatched")
 
 remotes.Parent = ReplicatedStorage
 
@@ -100,7 +108,9 @@ local function notify(player: Player, message: string, success: boolean)
 end
 
 local function getClickPower(data): number
-	local power = Config.Plungers[data.PlungerLevel].Power * Config.getMultiplier(data.Rebirths)
+	local power = Config.Plungers[data.PlungerLevel].Power
+		* Config.getMultiplier(data.Rebirths)
+		* Config.getPetMultiplier(data.Pets)
 	return math.max(1, math.floor(power))
 end
 
@@ -129,6 +139,10 @@ local function updateStats(player: Player)
 	player:SetAttribute("TankLevel", data.TankLevel)
 	player:SetAttribute("ClickPower", getClickPower(data))
 	player:SetAttribute("Capacity", getCapacity(data))
+	player:SetAttribute("PetMultiplier", Config.getPetMultiplier(data.Pets))
+	-- Every client reads this to show the pets menu and the pets following each player.
+	player:SetAttribute("Pets", HttpService:JSONEncode(data.Pets))
+	player:SetAttribute("SewerUnlocked", data.SewerUnlocked)
 	player:SetAttribute("Loaded", true)
 end
 
@@ -136,9 +150,28 @@ local function dataKey(player: Player): string
 	return "Player_" .. player.UserId
 end
 
+-- Keeps only real pets, and no more equipped than allowed.
+local function cleanPets(saved: any): { any }
+	local pets = {}
+	local equipped = 0
+	if type(saved) ~= "table" then
+		return pets
+	end
+	for _, pet in saved do
+		if type(pet) == "table" and Config.Pets[pet.Name] and #pets < Config.MaxPets then
+			local isEquipped = pet.Equipped == true and equipped < Config.MaxEquippedPets
+			if isEquipped then
+				equipped += 1
+			end
+			table.insert(pets, { Name = pet.Name, Equipped = isEquipped })
+		end
+	end
+	return pets
+end
+
 -- Returns the player's data, and whether it's safe to save over their old save.
 local function loadData(player: Player)
-	local data = table.clone(Config.StartingData)
+	local data = Config.newPlayerData()
 	if not store then
 		return data, false
 	end
@@ -151,7 +184,7 @@ local function loadData(player: Player)
 		end)
 		if ok then
 			if type(saved) == "table" then
-				-- Only copy known fields, so new fields added to StartingData get their default.
+				-- Only copy known fields, so new fields get their starting value.
 				for key, value in saved do
 					if type(value) == type(data[key]) then
 						data[key] = value
@@ -161,6 +194,7 @@ local function loadData(player: Player)
 			-- In case items were removed from Config since this save was made.
 			data.PlungerLevel = math.clamp(data.PlungerLevel, 1, #Config.Plungers)
 			data.TankLevel = math.clamp(data.TankLevel, 1, #Config.Tanks)
+			data.Pets = cleanPets(data.Pets)
 			return data, true
 		end
 		warn(("Loading %s's data failed (attempt %d): %s"):format(player.Name, attempt, tostring(saved)))
@@ -180,6 +214,7 @@ local function saveData(player: Player)
 	end
 
 	local data = table.clone(profile.data)
+	data.Pets = table.clone(data.Pets)
 	for attempt = 1, 3 do
 		local ok, err = pcall(function()
 			store:SetAsync(dataKey(player), data, { player.UserId })
@@ -240,6 +275,18 @@ local function findPlunger(player: Player): Tool?
 		or nil
 end
 
+-- Gives the player a plunger if they're alive and don't have one.
+local function ensurePlunger(player: Player)
+	local profile = profiles[player]
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local backpack = player:FindFirstChildOfClass("Backpack")
+	if not (profile and humanoid and humanoid.Health > 0 and backpack) or findPlunger(player) then
+		return
+	end
+	buildPlunger(Config.Plungers[profile.data.PlungerLevel].Color).Parent = backpack
+end
+
 -- Makes the plunger cup match the player's current plunger upgrade.
 local function paintPlunger(player: Player, tool: Tool?)
 	local profile = profiles[player]
@@ -247,6 +294,12 @@ local function paintPlunger(player: Player, tool: Tool?)
 	if profile and cup then
 		cup.Color = Config.Plungers[profile.data.PlungerLevel].Color
 	end
+end
+
+local function isInSewer(player: Player): boolean
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	return root ~= nil and root.Position.Y < Config.SewerDepth + 100
 end
 
 local function onPlungerClick(player: Player)
@@ -271,7 +324,11 @@ local function onPlungerClick(player: Player)
 		return
 	end
 
-	data.Flushes = math.min(data.Flushes + getClickPower(data), capacity)
+	local gain = getClickPower(data)
+	if isInSewer(player) then
+		gain *= Config.SewerMultiplier
+	end
+	data.Flushes = math.min(data.Flushes + gain, capacity)
 	updateStats(player)
 end
 
@@ -293,24 +350,13 @@ local function onCharacterChildAdded(player: Player, child: Instance)
 	end)
 end
 
-local function watchCharacter(player: Player, character: Model)
+local function onCharacterAdded(player: Player, character: Model)
 	character.ChildAdded:Connect(function(child)
 		onCharacterChildAdded(player, child)
 	end)
-end
-
-local function givePlunger(player: Player)
-	local profile = profiles[player]
-	local plunger = buildPlunger(Config.Plungers[profile.data.PlungerLevel].Color)
-
-	-- StarterGear hands the plunger out again every time the player respawns.
-	plunger.Parent = player:WaitForChild("StarterGear")
-
-	-- They've usually already spawned while their data loaded, so give this life's copy by hand.
-	local backpack = player:FindFirstChildOfClass("Backpack")
-	if player.Character and backpack and not findPlunger(player) then
-		plunger:Clone().Parent = backpack
-	end
+	character:WaitForChild("Humanoid", 10)
+	player:WaitForChild("Backpack", 10)
+	ensurePlunger(player)
 end
 
 --------------------------------------------------------------------------------
@@ -332,18 +378,33 @@ local function sell(player: Player)
 	notify(player, ("Sold %s Flushes for %s coins!"):format(Format.number(sold), Format.number(earned)), true)
 end
 
--- Uses a part named "SellPad" anywhere in Workspace (the map has one), otherwise makes a simple one.
-local function getSellPad(): BasePart
-	-- MapBuilder might still be building the map when this script starts, so wait a few seconds.
-	local deadline = os.clock() + 3
-	repeat
-		local existing = workspace:FindFirstChild("SellPad", true)
-		if existing and existing:IsA("BasePart") then
-			return existing
+-- Every part named "SellPad" sells your Flushes when you touch it (the map has
+-- one up top and one in the Sewers).
+local sellPads = {}
+local function connectSellPad(pad: Instance)
+	if not (pad.Name == "SellPad" and pad:IsA("BasePart")) or sellPads[pad] then
+		return
+	end
+	sellPads[pad] = true
+	pad.Touched:Connect(function(hit)
+		local character = hit:FindFirstAncestorOfClass("Model")
+		local player = character and Players:GetPlayerFromCharacter(character)
+		if player then
+			sell(player)
 		end
-		task.wait(0.2)
-	until os.clock() > deadline
+	end)
+end
 
+workspace.DescendantAdded:Connect(connectSellPad)
+for _, descendant in workspace:GetDescendants() do
+	connectSellPad(descendant)
+end
+
+-- If there's no map with a sell pad after a few seconds, make a simple one.
+task.delay(3, function()
+	if next(sellPads) then
+		return
+	end
 	local pad = Instance.new("Part")
 	pad.Name = "SellPad"
 	pad.Anchored = true
@@ -369,18 +430,6 @@ local function getSellPad(): BasePart
 	label.Parent = billboard
 
 	pad.Parent = workspace
-	return pad
-end
-
--- In its own thread so waiting for the map doesn't hold up players joining.
-task.spawn(function()
-	getSellPad().Touched:Connect(function(hit)
-		local character = hit:FindFirstAncestorOfClass("Model")
-		local player = character and Players:GetPlayerFromCharacter(character)
-		if player then
-			sell(player)
-		end
-	end)
 end)
 
 --------------------------------------------------------------------------------
@@ -433,6 +482,7 @@ rebirthRemote.OnServerInvoke = function(player: Player)
 		return false, ("You need %s more coins to rebirth."):format(Format.number(cost - data.Coins))
 	end
 
+	-- Pets and the Sewers stay unlocked.
 	data.Rebirths += 1
 	data.Coins = 0
 	data.Flushes = 0
@@ -442,6 +492,173 @@ rebirthRemote.OnServerInvoke = function(player: Player)
 	paintPlunger(player, findPlunger(player))
 	return true, ("Rebirthed! You now get %gx Flushes."):format(Config.getMultiplier(data.Rebirths))
 end
+
+--------------------------------------------------------------------------------
+-- Eggs and pets
+--------------------------------------------------------------------------------
+
+local function countEquipped(pets: { any }): number
+	local count = 0
+	for _, pet in pets do
+		if pet.Equipped then
+			count += 1
+		end
+	end
+	return count
+end
+
+local petRandom = Random.new()
+local function rollPet(egg): string
+	local total = 0
+	for _, option in egg.Pets do
+		total += option.Chance
+	end
+	local roll = petRandom:NextNumber(0, total)
+	for _, option in egg.Pets do
+		roll -= option.Chance
+		if roll <= 0 then
+			return option.Pet
+		end
+	end
+	return egg.Pets[#egg.Pets].Pet
+end
+
+local HATCH_SECONDS = 3.5 -- how long the hatching animation takes
+
+local function hatchEgg(player: Player, eggName: string)
+	local profile = profiles[player]
+	local egg = Config.getEgg(eggName)
+	if not (profile and egg) then
+		return
+	end
+	local now = os.clock()
+	if now - profile.lastHatch < HATCH_SECONDS then
+		return
+	end
+
+	local data = profile.data
+	if #data.Pets >= Config.MaxPets then
+		notify(player, ("Your pet inventory is full (%d)! Delete some pets first."):format(Config.MaxPets), false)
+		return
+	end
+	if data.Coins < egg.Price then
+		notify(player, ("You need %s more coins for the %s."):format(Format.number(egg.Price - data.Coins), egg.Name), false)
+		return
+	end
+
+	profile.lastHatch = now
+	data.Coins -= egg.Price
+	local petName = rollPet(egg)
+	table.insert(data.Pets, { Name = petName, Equipped = countEquipped(data.Pets) < Config.MaxEquippedPets })
+	updateStats(player)
+	hatchedRemote:FireClient(player, egg.Name, petName)
+end
+
+-- The pets menu asks for these: "Equip", "Unequip", "Delete" (with the pet's
+-- number and name, so a stale menu can't change the wrong pet), or "EquipBest".
+petRemote.OnServerInvoke = function(player: Player, action: any, index: any, petName: any)
+	local profile = profiles[player]
+	if not profile then
+		return false, "Your data is still loading..."
+	end
+	local pets = profile.data.Pets
+
+	if action == "EquipBest" then
+		local order = {}
+		for i in pets do
+			table.insert(order, i)
+		end
+		table.sort(order, function(a, b)
+			return Config.Pets[pets[a].Name].Boost > Config.Pets[pets[b].Name].Boost
+		end)
+		for rank, i in order do
+			pets[i].Equipped = rank <= Config.MaxEquippedPets
+		end
+		updateStats(player)
+		return true, "Equipped your best pets!"
+	end
+
+	local pet = type(index) == "number" and pets[index]
+	if not pet or pet.Name ~= petName then
+		return false, "That pet isn't there anymore."
+	end
+
+	if action == "Equip" then
+		if not pet.Equipped and countEquipped(pets) >= Config.MaxEquippedPets then
+			return false, ("You can only equip %d pets at once."):format(Config.MaxEquippedPets)
+		end
+		pet.Equipped = true
+		updateStats(player)
+		return true, ("Equipped %s!"):format(pet.Name)
+	elseif action == "Unequip" then
+		pet.Equipped = false
+		updateStats(player)
+		return true, ("Unequipped %s."):format(pet.Name)
+	elseif action == "Delete" then
+		table.remove(pets, index)
+		updateStats(player)
+		return true, ("Deleted %s."):format(pet.Name)
+	end
+	return false, "That doesn't work."
+end
+
+--------------------------------------------------------------------------------
+-- The Sewers
+--------------------------------------------------------------------------------
+
+-- Moves a player to the part named "SewerArrival" or "SurfaceArrival" in the map.
+local function teleport(player: Player, destination: string)
+	local profile = profiles[player]
+	if not profile then
+		return
+	end
+
+	local data = profile.data
+	if destination == "Sewer" and not data.SewerUnlocked then
+		if data.Coins < Config.SewerUnlockPrice then
+			notify(
+				player,
+				("The Sewers cost %s coins to unlock. You need %s more."):format(
+					Format.number(Config.SewerUnlockPrice),
+					Format.number(Config.SewerUnlockPrice - data.Coins)
+				),
+				false
+			)
+			return
+		end
+		data.Coins -= Config.SewerUnlockPrice
+		data.SewerUnlocked = true
+		updateStats(player)
+	end
+
+	local target = workspace:FindFirstChild(destination .. "Arrival", true)
+	local character = player.Character
+	if not (target and target:IsA("BasePart") and character) then
+		return
+	end
+	pcall(function()
+		player:RequestStreamAroundAsync(target.Position)
+	end)
+	character:PivotTo(target.CFrame + Vector3.new(0, 4, 0))
+	if destination == "Sewer" then
+		notify(player, ("Welcome to the Sewers! Clicks down here give %gx Flushes."):format(Config.SewerMultiplier), true)
+	end
+end
+
+--------------------------------------------------------------------------------
+-- "Press E" prompts in the map: eggs and sewer doors
+--------------------------------------------------------------------------------
+
+ProximityPromptService.PromptTriggered:Connect(function(prompt, player)
+	local eggName = prompt:GetAttribute("Egg")
+	if type(eggName) == "string" then
+		hatchEgg(player, eggName)
+	end
+	local destination = prompt:GetAttribute("TeleportTo")
+	if destination == "Sewer" or destination == "Surface" then
+		teleport(player, destination)
+	end
+end)
 
 --------------------------------------------------------------------------------
 -- Joining and leaving
@@ -467,6 +684,7 @@ local function onPlayerAdded(player: Player)
 		canSave = canSave,
 		lastClick = 0,
 		lastFullWarning = 0,
+		lastHatch = 0,
 	}
 	updateStats(player)
 
@@ -475,12 +693,11 @@ local function onPlayerAdded(player: Player)
 	end
 
 	player.CharacterAdded:Connect(function(character)
-		watchCharacter(player, character)
+		onCharacterAdded(player, character)
 	end)
 	if player.Character then
-		watchCharacter(player, player.Character)
+		task.spawn(onCharacterAdded, player, player.Character)
 	end
-	givePlunger(player)
 end
 
 Players.PlayerAdded:Connect(onPlayerAdded)
@@ -492,6 +709,16 @@ end
 Players.PlayerRemoving:Connect(function(player)
 	saveData(player)
 	profiles[player] = nil
+end)
+
+-- Every few seconds, give a plunger to anyone who somehow doesn't have one.
+task.spawn(function()
+	while true do
+		task.wait(3)
+		for player in profiles do
+			ensurePlunger(player)
+		end
+	end
 end)
 
 -- Save everyone when the server shuts down.
