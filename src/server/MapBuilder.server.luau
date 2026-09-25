@@ -1,44 +1,78 @@
--- Builds the starter map: a giant bathroom taken over by skibidi toilets.
+-- Builds the starter map: a sunny grass field with a stone plaza where players spawn.
 --
--- Layout (players spawn in the middle, facing the title sign):
---   front: the sell drain and the SKIBIDI SIMULATOR sign
---   left:  the Plunger Shop          right: the Rebirth toilet
---   back:  the sink and mirror, a bathtub, soap and a toothbrush
+-- Layout (players spawn in the middle of the plaza, facing the title sign):
+--   front: the SELL pad with a big sign above it, and the SKIBIDI SIMULATOR sign behind
+--   left:  the Plunger Shop                right: the Rebirth shrine
+--   back:  a pond with benches
+-- Trees, flowers, bushes and lamp posts are scattered around, and grassy hills
+-- (made of Terrain) circle the whole area.
 --
 -- Want to change the map by hand? Press Play, find "Map" in Workspace in the
 -- Explorer, right-click > Copy, press Stop, then right-click Workspace > Paste Into.
--- When a Model named "Map" is already in Workspace, this script leaves it alone.
+-- When a Model named "Map" is already in Workspace, this script doesn't build another.
 
 local TweenService = game:GetService("TweenService")
 
-if workspace:FindFirstChild("Map") then
-	return
-end
+local FLOOR = 0.2 -- height of the top of the grass
 
-local ROOM = 160 -- the bathroom is ROOM x ROOM studs
-local HALF = ROOM / 2
-local TILE = 10
-local FLOOR = 0.5 -- height of the top of the floor tiles
-local WALL_HEIGHT = 40
-local WALL_THICKNESS = 4
-
-local TILE_WHITE = Color3.fromRGB(245, 248, 255)
-local TILE_BLUE = Color3.fromRGB(120, 190, 255)
-local GROUT = Color3.fromRGB(170, 180, 195)
-local WALL = Color3.fromRGB(230, 240, 250)
-local STRIPE = Color3.fromRGB(60, 140, 230)
-local PORCELAIN = Color3.fromRGB(250, 250, 252)
-local SEAT = Color3.fromRGB(215, 218, 225)
-local SKIN = Color3.fromRGB(255, 205, 160)
-local BLACK = Color3.fromRGB(20, 20, 25)
-local MOUTH = Color3.fromRGB(120, 20, 30)
-local METAL = Color3.fromRGB(190, 195, 205)
-local WOOD = Color3.fromRGB(160, 110, 60)
+local GRASS = Color3.fromRGB(96, 168, 72)
+local PATH = Color3.fromRGB(200, 190, 165)
+local PATH_EDGE = Color3.fromRGB(140, 135, 125)
+local PLAZA = Color3.fromRGB(215, 210, 195)
+local STONE = Color3.fromRGB(150, 150, 155)
+local MARBLE = Color3.fromRGB(238, 234, 226)
+local WOOD = Color3.fromRGB(165, 115, 70)
+local WOOD_LIGHT = Color3.fromRGB(200, 160, 110)
+local WOOD_DARK = Color3.fromRGB(95, 65, 40)
+local ROOF = Color3.fromRGB(185, 65, 55)
 local PURPLE = Color3.fromRGB(160, 80, 255)
-local SIGN_BACKGROUND = Color3.fromRGB(28, 32, 46)
+local GOLD = Color3.fromRGB(255, 205, 60)
+local WHITE = Color3.fromRGB(250, 250, 250)
+local RED = Color3.fromRGB(230, 60, 60)
+local WATER = Color3.fromRGB(70, 160, 230)
+local LAMP_GLOW = Color3.fromRGB(255, 220, 150)
+
+local LEAF_COLORS = {
+	Color3.fromRGB(70, 150, 60),
+	Color3.fromRGB(60, 135, 55),
+	Color3.fromRGB(90, 170, 70),
+	Color3.fromRGB(55, 125, 65),
+}
+local FLOWER_COLORS = {
+	Color3.fromRGB(255, 90, 90),
+	Color3.fromRGB(255, 210, 60),
+	Color3.fromRGB(255, 140, 200),
+	Color3.fromRGB(250, 250, 250),
+	Color3.fromRGB(170, 110, 255),
+	Color3.fromRGB(255, 150, 60),
+}
 
 -- Cylinders in Roblox lie along the X axis; this turns them to stand upright.
 local UPRIGHT = CFrame.Angles(0, 0, math.rad(90))
+
+-- A fixed seed, so trees and flowers land in the same spots every time.
+local rng = Random.new(2024)
+
+--------------------------------------------------------------------------------
+-- Grassy hills around the edge (Terrain). Skipped if the place already has Terrain.
+--------------------------------------------------------------------------------
+
+local terrain = workspace.Terrain
+if terrain:CountCells() == 0 then
+	terrain:SetMaterialColor(Enum.Material.Grass, GRASS)
+	local hillCount = 20
+	for i = 1, hillCount do
+		local angle = (i / hillCount) * math.pi * 2 + rng:NextNumber(-0.1, 0.1)
+		local distance = rng:NextNumber(230, 290)
+		local radius = rng:NextNumber(40, 70)
+		local center = Vector3.new(math.cos(angle) * distance, FLOOR - radius * 0.45, math.sin(angle) * distance)
+		terrain:FillBall(center, radius, Enum.Material.Grass)
+	end
+end
+
+if workspace:FindFirstChild("Map") then
+	return -- you've saved your own copy of the map
+end
 
 local map = Instance.new("Model")
 map.Name = "Map"
@@ -67,26 +101,51 @@ local function part(props: { [string]: any }): Part
 	return newPart
 end
 
+local function block(parent: Instance, cframe: CFrame, size: Vector3, color: Color3, material: Enum.Material?): Part
+	return part({
+		Size = size,
+		CFrame = cframe,
+		Color = color,
+		Material = material or Enum.Material.SmoothPlastic,
+		Parent = parent,
+	})
+end
+
 -- An upright cylinder whose bottom sits at `bottom`.
-local function pillar(parent: Instance, bottom: Vector3, height: number, diameter: number, color: Color3): Part
+local function pillar(parent: Instance, bottom: Vector3, height: number, diameter: number, color: Color3, material: Enum.Material?): Part
 	return part({
 		Shape = Enum.PartType.Cylinder,
 		Size = Vector3.new(height, diameter, diameter),
 		CFrame = CFrame.new(bottom + Vector3.new(0, height / 2, 0)) * UPRIGHT,
 		Color = color,
+		Material = material or Enum.Material.SmoothPlastic,
 		Parent = parent,
 	})
 end
 
--- Sticks `attached` to `base` so it moves along with it.
-local function weld(base: BasePart, attached: BasePart)
-	attached.Anchored = false
-	attached.CanCollide = false
-	local joint = Instance.new("Weld")
-	joint.Part0 = base
-	joint.Part1 = attached
-	joint.C0 = base.CFrame:ToObjectSpace(attached.CFrame)
-	joint.Parent = attached
+local function ball(parent: Instance, center: Vector3, diameter: number, color: Color3, material: Enum.Material?): Part
+	return part({
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.one * diameter,
+		CFrame = CFrame.new(center),
+		Color = color,
+		Material = material or Enum.Material.SmoothPlastic,
+		Parent = parent,
+	})
+end
+
+-- A WedgePart is tallest at its back (+Z) and slopes down to nothing at its front (-Z).
+local function wedge(parent: Instance, cframe: CFrame, size: Vector3, color: Color3, material: Enum.Material): WedgePart
+	local newWedge = Instance.new("WedgePart")
+	newWedge.Anchored = true
+	newWedge.Size = size
+	newWedge.CFrame = cframe
+	newWedge.Color = color
+	newWedge.Material = material
+	newWedge.TopSurface = Enum.SurfaceType.Smooth
+	newWedge.BottomSurface = Enum.SurfaceType.Smooth
+	newWedge.Parent = parent
+	return newWedge
 end
 
 -- Text floating above a part.
@@ -125,7 +184,7 @@ local function surfaceText(target: BasePart, face: Enum.NormalId, text: string, 
 	label.Text = text
 	label.TextColor3 = color
 	label.TextScaled = true
-	label.TextStrokeTransparency = 0
+	label.TextStrokeTransparency = 0.3
 	label.Parent = gui
 end
 
@@ -141,445 +200,492 @@ local function menuPrompt(target: BasePart, menu: string, actionText: string, ob
 	prompt.Parent = target
 end
 
---------------------------------------------------------------------------------
--- Skibidi toilet
---------------------------------------------------------------------------------
-
-local bobbingHeads: { { head: BasePart, scale: number } } = {}
-
--- Builds a skibidi toilet standing on `base` (a CFrame on the floor) and facing
--- the way `base` looks. `scale` 1 is about 4.5 studs tall.
-local function skibidiToilet(parent: Instance, base: CFrame, scale: number, bodyColor: Color3, material: Enum.Material): Model
-	local toilet = Instance.new("Model")
-	toilet.Name = "SkibidiToilet"
-	toilet.Parent = parent
-
-	local function block(name: string, offset: Vector3, size: Vector3, color: Color3, tilt: CFrame?): Part
-		return part({
-			Name = name,
-			Size = size * scale,
-			CFrame = base * CFrame.new(offset * scale) * (tilt or CFrame.identity),
-			Color = color,
-			Material = material,
-			Parent = toilet,
-		})
-	end
-	local function disc(name: string, offset: Vector3, height: number, diameter: number, color: Color3): Part
-		return part({
-			Name = name,
-			Shape = Enum.PartType.Cylinder,
-			Size = Vector3.new(height, diameter, diameter) * scale,
-			CFrame = base * CFrame.new(offset * scale) * UPRIGHT,
-			Color = color,
-			Material = material,
-			Parent = toilet,
-		})
-	end
-	local function ball(name: string, offset: Vector3, diameter: number, color: Color3): Part
-		return part({
-			Name = name,
-			Shape = Enum.PartType.Ball,
-			Size = Vector3.one * diameter * scale,
-			CFrame = base * CFrame.new(offset * scale),
-			Color = color,
-			Parent = toilet,
-		})
-	end
-
-	-- The toilet. Its front is -Z (the way `base` looks), so the tank is at +Z.
-	disc("Pedestal", Vector3.new(0, 0.6, 0), 1.2, 1.6, bodyColor)
-	disc("Bowl", Vector3.new(0, 1.65, 0), 0.9, 2.6, bodyColor)
-	disc("Seat", Vector3.new(0, 2.2, 0), 0.2, 2.8, SEAT)
-	block("Tank", Vector3.new(0, 3.1, 1.4), Vector3.new(2.6, 2.2, 1), bodyColor)
-	block("TankLid", Vector3.new(0, 4.3, 1.4), Vector3.new(2.8, 0.25, 1.2), bodyColor)
-	block("FlushHandle", Vector3.new(-0.9, 3.8, 0.85), Vector3.new(0.5, 0.15, 0.15), METAL)
-
-	-- The head sticking out of the bowl, with an angry face welded on so it moves with the head.
-	local head = ball("Head", Vector3.new(0, 2.9, -0.1), 1.8, SKIN)
-	head.CanCollide = false
-	for _, side in { -1, 1 } do
-		weld(head, ball("Eye", Vector3.new(0.35 * side, 3.1, -0.8), 0.3, BLACK))
-		local tilt = CFrame.Angles(0, 0, math.rad(20 * side)) -- inner ends lower = angry
-		weld(head, block("Eyebrow", Vector3.new(0.35 * side, 3.35, -0.72), Vector3.new(0.45, 0.1, 0.1), BLACK, tilt))
-	end
-	weld(head, block("Mouth", Vector3.new(0, 2.55, -0.82), Vector3.new(0.7, 0.22, 0.1), MOUTH))
-	table.insert(bobbingHeads, { head = head, scale = scale })
-
-	return toilet
+local function pick<T>(list: { T }): T
+	return list[rng:NextInteger(1, #list)]
 end
 
 --------------------------------------------------------------------------------
--- Floor, walls and title sign
+-- Ground, plaza and paths
 --------------------------------------------------------------------------------
 
-local floor = group("Floor")
+local ground = group("Ground")
 
--- The grout shows in the thin gaps between tiles.
-part({
-	Name = "Grout",
-	Size = Vector3.new(ROOM, 1, ROOM),
-	CFrame = CFrame.new(0, FLOOR - 0.7, 0),
-	Color = GROUT,
-	Parent = floor,
-})
+-- One huge grass part. It sits just above the default Baseplate so it covers it.
+block(ground, CFrame.new(0, FLOOR - 1, 0), Vector3.new(2048, 2, 2048), GRASS, Enum.Material.Grass).Name = "Grass"
 
-for x = -HALF + TILE / 2, HALF - TILE / 2, TILE do
-	for z = -HALF + TILE / 2, HALF - TILE / 2, TILE do
-		local isWhite = ((x + z) / TILE) % 2 == 0
-		part({
-			Name = "Tile",
-			Size = Vector3.new(TILE - 0.3, 0.4, TILE - 0.3),
-			CFrame = CFrame.new(x, FLOOR - 0.2, z),
-			Color = if isWhite then TILE_WHITE else TILE_BLUE,
-			Parent = floor,
-		})
-	end
+-- The round stone plaza where players spawn.
+pillar(ground, Vector3.new(0, FLOOR - 0.2, 0), 0.5, 44, STONE, Enum.Material.Slate)
+pillar(ground, Vector3.new(0, FLOOR - 0.2, 0), 0.6, 40, PLAZA, Enum.Material.Cobblestone)
+
+-- Stone paths from the plaza to the sell pad, shop, rebirth shrine and pond.
+for _, path in {
+	{ center = Vector3.new(0, 0, -28.5), size = Vector3.new(9, 0, 21) }, -- sell
+	{ center = Vector3.new(0, 0, 32), size = Vector3.new(9, 0, 28) }, -- pond
+	{ center = Vector3.new(-32, 0, 0), size = Vector3.new(28, 0, 9) }, -- shop
+	{ center = Vector3.new(32, 0, 0), size = Vector3.new(28, 0, 9) }, -- rebirth
+} do
+	local runsAlongZ = path.size.X < path.size.Z
+	local edgeSize = if runsAlongZ
+		then Vector3.new(path.size.X + 2, 0.4, path.size.Z)
+		else Vector3.new(path.size.X, 0.4, path.size.Z + 2)
+	block(ground, CFrame.new(path.center + Vector3.new(0, FLOOR - 0.05, 0)), edgeSize, PATH_EDGE, Enum.Material.Slate)
+	block(
+		ground,
+		CFrame.new(path.center + Vector3.new(0, FLOOR + 0.05, 0)),
+		Vector3.new(path.size.X, 0.4, path.size.Z),
+		PATH,
+		Enum.Material.Cobblestone
+	)
 end
 
-local walls = group("Walls")
-for _, side in { Vector3.new(0, 0, -1), Vector3.new(0, 0, 1), Vector3.new(-1, 0, 0), Vector3.new(1, 0, 0) } do
-	local runsAlongX = side.X == 0
-	local length = ROOM + WALL_THICKNESS * 2
-
-	part({
-		Name = "Wall",
-		Size = if runsAlongX
-			then Vector3.new(length, WALL_HEIGHT, WALL_THICKNESS)
-			else Vector3.new(WALL_THICKNESS, WALL_HEIGHT, length),
-		CFrame = CFrame.new(side * (HALF + WALL_THICKNESS / 2) + Vector3.new(0, FLOOR + WALL_HEIGHT / 2, 0)),
-		Color = WALL,
-		Parent = walls,
-	})
-
-	-- Blue tile stripes along the inside of the wall.
-	for _, height in { 8, 11 } do
-		part({
-			Name = "Stripe",
-			Size = if runsAlongX then Vector3.new(ROOM, 1.5, 0.4) else Vector3.new(0.4, 1.5, ROOM),
-			CFrame = CFrame.new(side * (HALF - 0.2) + Vector3.new(0, FLOOR + height, 0)),
-			Color = STRIPE,
-			Parent = walls,
-		})
-	end
-end
-
--- The big sign on the front wall, facing the spawn.
-local titleSign = part({
-	Name = "TitleSign",
-	Size = Vector3.new(80, 16, 1),
-	CFrame = CFrame.new(0, FLOOR + 26, -HALF + 0.5),
-	Color = SIGN_BACKGROUND,
-	Parent = walls,
-})
-surfaceText(titleSign, Enum.NormalId.Back, "🚽 SKIBIDI SIMULATOR 🚽", Color3.fromRGB(255, 205, 60))
-
--- Use the place's spawn if it has one, otherwise add one in the middle.
+-- Use the place's spawn if it has one, otherwise add one in the middle of the plaza.
 if not workspace:FindFirstChildWhichIsA("SpawnLocation", true) then
 	local spawn = Instance.new("SpawnLocation")
 	spawn.Anchored = true
 	spawn.Size = Vector3.new(12, 1, 12)
-	spawn.CFrame = CFrame.new(0, FLOOR + 0.5, 0)
-	spawn.Color = STRIPE
+	spawn.CFrame = CFrame.new(0, FLOOR + 0.9, 0)
+	spawn.Color = Color3.fromRGB(60, 140, 230)
 	spawn.Material = Enum.Material.SmoothPlastic
 	spawn.Duration = 0
 	spawn.Parent = map
 end
 
 --------------------------------------------------------------------------------
--- Sell drain (in front of the spawn)
+-- Sell pad with a big sign above it (in front of the spawn)
 --------------------------------------------------------------------------------
 
-local sellArea = group("SellDrain")
-local drainCenter = Vector3.new(0, FLOOR, -30)
+local sellArea = group("SellArea")
+local sellCenter = Vector3.new(0, FLOOR, -48)
 
-pillar(sellArea, drainCenter, 0.4, 19, METAL).Material = Enum.Material.Metal
+pillar(sellArea, sellCenter - Vector3.new(0, 0.2, 0), 0.7, 20, STONE, Enum.Material.Slate)
 
 -- GameServer looks for a part named "SellPad" and sells your Flushes when you touch it.
-local sellPad = pillar(sellArea, drainCenter, 0.7, 15, Color3.fromRGB(60, 220, 90))
+local sellPad = pillar(sellArea, sellCenter - Vector3.new(0, 0.2, 0), 1, 16, Color3.fromRGB(70, 220, 100), Enum.Material.Neon)
 sellPad.Name = "SellPad"
-sellPad.Material = Enum.Material.Neon
 
--- Grate bars across the drain.
-for offset = -5, 5, 2.5 do
-	part({
-		Name = "GrateBar",
-		Size = Vector3.new(0.6, 0.25, 14),
-		CFrame = CFrame.new(drainCenter + Vector3.new(offset, 0.8, 0)),
-		Color = Color3.fromRGB(70, 75, 85),
-		Material = Enum.Material.Metal,
-		CanCollide = false,
-		CanTouch = false,
-		Parent = sellArea,
-	})
+-- An arch over the pad with the SELL sign on it.
+for _, side in { -1, 1 } do
+	block(sellArea, CFrame.new(sellCenter + Vector3.new(11.5 * side, 7, 0)), Vector3.new(1.8, 14, 1.8), WOOD_DARK, Enum.Material.Wood)
+	ball(sellArea, sellCenter + Vector3.new(11.5 * side, 16.2, 0), 2, GOLD, Enum.Material.Foil)
 end
-floatingLabel(sellPad, "💰 SELL HERE 💰", Color3.fromRGB(120, 255, 140), 7)
+block(sellArea, CFrame.new(sellCenter + Vector3.new(0, 14.6, 0)), Vector3.new(27, 1.2, 2), WOOD_DARK, Enum.Material.Wood)
+local sellSign = block(sellArea, CFrame.new(sellCenter + Vector3.new(0, 11.5, 0)), Vector3.new(21, 5, 1.2), Color3.fromRGB(40, 120, 60))
+surfaceText(sellSign, Enum.NormalId.Back, "💰 SELL 💰", WHITE)
+surfaceText(sellSign, Enum.NormalId.Front, "💰 SELL 💰", WHITE)
+
+-- Piles of gold coins beside the pad.
+for _, spot in { Vector3.new(-15, 0, 3), Vector3.new(15, 0, 3), Vector3.new(-14.5, 0, -4), Vector3.new(14.5, 0, -4) } do
+	for i = 1, rng:NextInteger(4, 8) do
+		local jitter = Vector3.new(rng:NextNumber(-0.3, 0.3), 0, rng:NextNumber(-0.3, 0.3))
+		pillar(sellArea, sellCenter + spot + jitter + Vector3.new(0, (i - 1) * 0.45, 0), 0.45, 2.4, GOLD, Enum.Material.Foil)
+	end
+end
 
 --------------------------------------------------------------------------------
 -- Plunger Shop (left of the spawn, facing it)
 --------------------------------------------------------------------------------
 
 local shop = group("PlungerShop")
-local shopX = -46
+local shopX = -60
+local depth, width, wallHeight = 20, 24, 12 -- depth runs along X, width along Z
+local floorTop = FLOOR + 0.6
+local wallTop = floorTop + wallHeight
+local front = shopX + depth / 2
 
-part({
-	Name = "ShopFloor",
-	Size = Vector3.new(20, 0.6, 26),
-	CFrame = CFrame.new(shopX, FLOOR + 0.3, 0),
-	Color = Color3.fromRGB(70, 130, 220),
-	Parent = shop,
-})
-part({
-	Name = "BackWall",
-	Size = Vector3.new(1.5, 16, 26),
-	CFrame = CFrame.new(shopX - 9.25, FLOOR + 8.6, 0),
-	Color = TILE_WHITE,
-	Parent = shop,
-})
+-- Wooden floor with a porch out front.
+block(shop, CFrame.new(shopX + 3, FLOOR + 0.3, 0), Vector3.new(depth + 6, 0.6, width + 2), WOOD_LIGHT, Enum.Material.WoodPlanks)
+
+-- Walls: back, two sides, and a front with corner posts and a header beam.
+block(shop, CFrame.new(shopX - depth / 2 + 0.5, floorTop + wallHeight / 2, 0), Vector3.new(1, wallHeight, width), WOOD, Enum.Material.WoodPlanks)
 for _, side in { -1, 1 } do
-	part({
-		Name = "SideWall",
-		Size = Vector3.new(16, 16, 1.5),
-		CFrame = CFrame.new(shopX - 1, FLOOR + 8.6, 12.25 * side),
-		Color = TILE_WHITE,
-		Parent = shop,
-	})
+	block(
+		shop,
+		CFrame.new(shopX + 0.5, floorTop + wallHeight / 2, side * (width / 2 - 0.5)),
+		Vector3.new(depth - 1, wallHeight, 1),
+		WOOD,
+		Enum.Material.WoodPlanks
+	)
+	block(
+		shop,
+		CFrame.new(front - 0.6, floorTop + wallHeight / 2, side * (width / 2 - 0.6)),
+		Vector3.new(1.2, wallHeight, 1.2),
+		WOOD_DARK,
+		Enum.Material.Wood
+	)
 end
+block(shop, CFrame.new(front - 0.5, wallTop - 1.5, 0), Vector3.new(1, 3, width), WOOD_DARK, Enum.Material.Wood)
 
--- Red and white striped awning.
-for i = 0, 6 do
-	part({
-		Name = "Awning",
-		Size = Vector3.new(22, 1.2, 4),
-		CFrame = CFrame.new(shopX + 1, FLOOR + 17.2, -12 + i * 4),
-		Color = if i % 2 == 0 then Color3.fromRGB(230, 60, 60) else PORCELAIN,
-		Parent = shop,
-	})
+-- Sloped roof: two slabs meeting at a ridge, with triangle walls filling each end.
+local roofAngle = math.rad(28)
+local overhang = 1.5
+local rise = (depth / 2) * math.tan(roofAngle)
+local ridge = Vector3.new(shopX, wallTop + rise, 0)
+local slabLength = (depth / 2 + overhang) / math.cos(roofAngle)
+for _, side in { -1, 1 } do
+	local downSlope = Vector3.new(side * math.cos(roofAngle), -math.sin(roofAngle), 0)
+	block(
+		shop,
+		CFrame.new(ridge + downSlope * (slabLength / 2) + Vector3.new(0, 0.4, 0)) * CFrame.Angles(0, 0, -side * roofAngle),
+		Vector3.new(slabLength, 0.8, width + overhang * 2),
+		ROOF,
+		Enum.Material.Slate
+	)
+	for _, halfSide in { -1, 1 } do
+		-- Each end triangle is two wedges, tallest under the ridge.
+		local center = Vector3.new(shopX + halfSide * depth / 4, wallTop + rise / 2, side * (width / 2 - 0.5))
+		wedge(
+			shop,
+			CFrame.fromMatrix(center, Vector3.new(0, 0, halfSide), Vector3.yAxis),
+			Vector3.new(1, rise, depth / 2),
+			WOOD,
+			Enum.Material.WoodPlanks
+		)
+	end
 end
+block(shop, CFrame.new(ridge + Vector3.new(0, 0.6, 0)), Vector3.new(1, 1, width + overhang * 2 + 0.4), Color3.fromRGB(140, 45, 40), Enum.Material.Slate)
 
-local shopSign = part({
-	Name = "ShopSign",
-	Size = Vector3.new(1, 5, 20),
-	CFrame = CFrame.new(shopX + 10.5, FLOOR + 14, 0),
-	Color = SIGN_BACKGROUND,
-	Parent = shop,
-})
-surfaceText(shopSign, Enum.NormalId.Right, "🛒 PLUNGER SHOP", PORCELAIN)
+-- Sign above the counter.
+local shopSign = block(shop, CFrame.new(front + 0.3, wallTop - 1.5, 0), Vector3.new(0.6, 2.6, width - 5), Color3.fromRGB(60, 40, 25))
+surfaceText(shopSign, Enum.NormalId.Right, "🛒 PLUNGER SHOP", GOLD)
 
-local counter = part({
-	Name = "Counter",
-	Size = Vector3.new(3, 4, 16),
-	CFrame = CFrame.new(shopX + 7, FLOOR + 2.6, 0),
-	Color = WOOD,
-	Material = Enum.Material.Wood,
-	Parent = shop,
-})
+-- The counter you walk up to.
+local counter = block(shop, CFrame.new(front - 2, floorTop + 1.8, 0), Vector3.new(2.4, 3.6, width - 6), WOOD, Enum.Material.Wood)
+counter.Name = "Counter"
+block(shop, CFrame.new(front - 2, floorTop + 3.8, 0), Vector3.new(3, 0.4, width - 5), WOOD_LIGHT, Enum.Material.Wood)
 menuPrompt(counter, "Shop", "Open Shop", "Plunger Shop")
-floatingLabel(counter, "🛒 SHOP", PORCELAIN, 17)
+floatingLabel(counter, "🛒 SHOP", WHITE, 22)
 
--- Plungers for sale hanging on the back wall.
-local plungerColors = {
-	Color3.fromRGB(230, 60, 60),
-	Color3.fromRGB(255, 200, 40),
-	Color3.fromRGB(90, 220, 255),
-	Color3.fromRGB(180, 90, 255),
-}
-for i, color in plungerColors do
+-- Plungers for sale on the back wall.
+for i, color in { RED, GOLD, Color3.fromRGB(90, 220, 255), PURPLE } do
 	local z = -7.5 + (i - 1) * 5
-	pillar(shop, Vector3.new(shopX - 8, FLOOR + 5, z), 6, 0.5, WOOD)
-	pillar(shop, Vector3.new(shopX - 8, FLOOR + 4, z), 1, 2.4, color)
+	pillar(shop, Vector3.new(shopX - depth / 2 + 2, floorTop + 5, z), 6, 0.5, WOOD, Enum.Material.Wood)
+	pillar(shop, Vector3.new(shopX - depth / 2 + 2, floorTop + 4, z), 1, 2.4, color)
 end
 
--- A giant plunger standing outside the shop.
-pillar(shop, Vector3.new(shopX + 9, FLOOR, 17), 3, 8, Color3.fromRGB(230, 60, 60))
-pillar(shop, Vector3.new(shopX + 9, FLOOR + 3, 17), 16, 1.5, WOOD).Material = Enum.Material.Wood
+-- A giant plunger and some crates out front.
+pillar(shop, Vector3.new(front + 4, FLOOR, 17.5), 3, 7, RED)
+pillar(shop, Vector3.new(front + 4, FLOOR + 3, 17.5), 14, 1.4, WOOD, Enum.Material.Wood)
+block(shop, CFrame.new(front + 4, FLOOR + 2, -16), Vector3.new(4, 4, 4), WOOD_LIGHT, Enum.Material.WoodPlanks)
+block(shop, CFrame.new(front + 4, FLOOR + 5.5, -16) * CFrame.Angles(0, math.rad(20), 0), Vector3.new(3, 3, 3), WOOD_LIGHT, Enum.Material.WoodPlanks)
 
 --------------------------------------------------------------------------------
--- Rebirth toilet (right of the spawn, facing it)
+-- Rebirth shrine with a floating crystal (right of the spawn)
 --------------------------------------------------------------------------------
 
-local rebirthArea = group("RebirthToilet")
-local rebirthCenter = Vector3.new(46, FLOOR, 0)
+local rebirthArea = group("RebirthShrine")
+local shrineCenter = Vector3.new(60, FLOOR, 0)
+local below = Vector3.new(0, 0.2, 0)
 
-pillar(rebirthArea, rebirthCenter, 0.3, 27, PURPLE).Material = Enum.Material.Neon
-pillar(rebirthArea, rebirthCenter, 0.6, 24, Color3.fromRGB(60, 30, 100))
+-- A stepped marble platform with a glowing purple ring.
+pillar(rebirthArea, shrineCenter - below, 1, 28, MARBLE, Enum.Material.Marble)
+pillar(rebirthArea, shrineCenter - below, 1.1, 22, PURPLE, Enum.Material.Neon)
+pillar(rebirthArea, shrineCenter - below, 1.2, 20, MARBLE, Enum.Material.Marble)
 
-local rebirthToilet = skibidiToilet(
-	rebirthArea,
-	CFrame.lookAt(rebirthCenter + Vector3.new(0, 0.6, 0), Vector3.new(0, FLOOR + 0.6, 0)),
-	3.5,
-	PURPLE,
-	Enum.Material.Neon
-)
-local rebirthBowl = rebirthToilet:FindFirstChild("Bowl") :: BasePart
-menuPrompt(rebirthBowl, "Rebirth", "Rebirth", "Rebirth Toilet")
-floatingLabel(rebirthBowl, "⭐ REBIRTH ⭐", Color3.fromRGB(220, 170, 255), 16)
-Instance.new("Sparkles").Parent = rebirthBowl
-
-local glow = Instance.new("PointLight")
-glow.Color = PURPLE
-glow.Range = 24
-glow.Brightness = 3
-glow.Parent = rebirthBowl
-
---------------------------------------------------------------------------------
--- Decorations
---------------------------------------------------------------------------------
-
-local decorations = group("Decorations")
-
--- Skibidi toilets around the room, all staring at the middle.
-for _, spot in {
-	Vector3.new(-35, FLOOR, -60),
-	Vector3.new(35, FLOOR, -60),
-	Vector3.new(-65, FLOOR, -30),
-	Vector3.new(65, FLOOR, -30),
-	Vector3.new(-65, FLOOR, 35),
-	Vector3.new(65, FLOOR, 35),
-} do
-	skibidiToilet(decorations, CFrame.lookAt(spot, Vector3.new(0, FLOOR, 0)), 2.5, PORCELAIN, Enum.Material.SmoothPlastic)
+-- Marble columns around the edge.
+for i = 1, 6 do
+	local angle = (i / 6) * math.pi * 2
+	local base = shrineCenter + Vector3.new(math.cos(angle) * 12, 0.8, math.sin(angle) * 12)
+	pillar(rebirthArea, base, 12, 2, MARBLE, Enum.Material.Marble)
+	pillar(rebirthArea, base + Vector3.new(0, 8, 0), 0.6, 2.3, PURPLE, Enum.Material.Neon)
+	block(rebirthArea, CFrame.new(base + Vector3.new(0, 12.4, 0)), Vector3.new(3, 0.8, 3), MARBLE, Enum.Material.Marble)
 end
 
--- Giant toilet paper rolls in the corners.
-for _, corner in { Vector3.new(-65, FLOOR, -65), Vector3.new(65, FLOOR, -65), Vector3.new(-65, FLOOR, 65), Vector3.new(65, FLOOR, 65) } do
-	pillar(decorations, corner, 24, 12, PORCELAIN).Material = Enum.Material.Fabric
-	pillar(decorations, corner + Vector3.new(0, 24, 0), 0.2, 5, Color3.fromRGB(110, 75, 45))
-end
+-- The altar in the middle, where the "Press E to Rebirth" prompt is.
+local altar = block(rebirthArea, CFrame.new(shrineCenter + Vector3.new(0, 2.5, 0)), Vector3.new(5, 3, 5), MARBLE, Enum.Material.Marble)
+altar.Name = "Altar"
+block(rebirthArea, CFrame.new(shrineCenter + Vector3.new(0, 4.2, 0)), Vector3.new(5.6, 0.4, 5.6), PURPLE, Enum.Material.Neon)
+menuPrompt(altar, "Rebirth", "Rebirth", "Rebirth Shrine")
+floatingLabel(altar, "⭐ REBIRTH ⭐", Color3.fromRGB(220, 170, 255), 17)
 
--- Bathtub with water you can jump into, and a rubber duck.
-local tubCenter = Vector3.new(30, FLOOR, 55)
-local tubLength, tubWidth, tubHeight, tubSide = 36, 20, 6, 1.5
-part({
-	Name = "TubBottom",
-	Size = Vector3.new(tubLength, 1, tubWidth),
-	CFrame = CFrame.new(tubCenter + Vector3.new(0, 0.5, 0)),
-	Color = PORCELAIN,
-	Parent = decorations,
-})
-for _, side in { -1, 1 } do
-	part({
-		Name = "TubSide",
-		Size = Vector3.new(tubLength, tubHeight, tubSide),
-		CFrame = CFrame.new(tubCenter + Vector3.new(0, tubHeight / 2, side * (tubWidth - tubSide) / 2)),
-		Color = PORCELAIN,
-		Parent = decorations,
-	})
-	part({
-		Name = "TubEnd",
-		Size = Vector3.new(tubSide, tubHeight, tubWidth - tubSide * 2),
-		CFrame = CFrame.new(tubCenter + Vector3.new(side * (tubLength - tubSide) / 2, tubHeight / 2, 0)),
-		Color = PORCELAIN,
-		Parent = decorations,
-	})
-end
-part({
-	Name = "Water",
-	Size = Vector3.new(tubLength - tubSide * 2, tubHeight - 2, tubWidth - tubSide * 2),
-	CFrame = CFrame.new(tubCenter + Vector3.new(0, 1 + (tubHeight - 2) / 2, 0)),
-	Color = Color3.fromRGB(80, 170, 255),
-	Material = Enum.Material.Glass,
-	Transparency = 0.4,
+-- A glowing crystal balanced on one corner. It's welded to an invisible anchor:
+-- the anchor bobs up and down, and turning the weld spins the crystal.
+local crystalAnchor = part({
+	Name = "CrystalAnchor",
+	Size = Vector3.one,
+	CFrame = CFrame.new(shrineCenter + Vector3.new(0, 10, 0)),
+	Transparency = 1,
 	CanCollide = false,
-	Parent = decorations,
+	CanQuery = false,
+	CanTouch = false,
+	Parent = rebirthArea,
 })
-pillar(decorations, tubCenter + Vector3.new(tubLength / 2 - 0.75, tubHeight, 0), 3, 1, METAL).Material = Enum.Material.Metal
+local cornerUp = CFrame.fromAxisAngle(Vector3.new(-1, 0, 1).Unit, math.acos(1 / math.sqrt(3)))
+local crystal = part({
+	Name = "Crystal",
+	Size = Vector3.one * 4.5,
+	CFrame = crystalAnchor.CFrame * cornerUp,
+	Color = PURPLE,
+	Material = Enum.Material.Neon,
+	Anchored = false,
+	CanCollide = false,
+	Parent = rebirthArea,
+})
+local crystalWeld = Instance.new("Weld")
+crystalWeld.Part0 = crystalAnchor
+crystalWeld.Part1 = crystal
+crystalWeld.C0 = cornerUp
+crystalWeld.Parent = crystal
+Instance.new("Sparkles").Parent = crystal
 
-local duckSpot = tubCenter + Vector3.new(-4, tubHeight - 1, 0)
-local duckYellow = Color3.fromRGB(255, 220, 40)
-part({ Name = "DuckBody", Shape = Enum.PartType.Ball, Size = Vector3.one * 4, CFrame = CFrame.new(duckSpot), Color = duckYellow, Parent = decorations })
-part({ Name = "DuckHead", Shape = Enum.PartType.Ball, Size = Vector3.one * 2.6, CFrame = CFrame.new(duckSpot + Vector3.new(-1.3, 2.2, 0)), Color = duckYellow, Parent = decorations })
-part({ Name = "DuckBeak", Size = Vector3.new(1.2, 0.5, 1), CFrame = CFrame.new(duckSpot + Vector3.new(-2.8, 2, 0)), Color = Color3.fromRGB(255, 140, 30), Parent = decorations })
-for _, side in { -1, 1 } do
-	part({ Name = "DuckEye", Shape = Enum.PartType.Ball, Size = Vector3.one * 0.4, CFrame = CFrame.new(duckSpot + Vector3.new(-2.2, 2.6, 0.6 * side)), Color = BLACK, Parent = decorations })
-end
-
--- Giant sink and mirror on the back wall.
-local sinkX = -30
-part({
-	Name = "SinkCabinet",
-	Size = Vector3.new(30, 10, 12),
-	CFrame = CFrame.new(sinkX, FLOOR + 5, HALF - 6),
-	Color = PORCELAIN,
-	Parent = decorations,
-})
-pillar(decorations, Vector3.new(sinkX, FLOOR + 10, HALF - 6), 0.3, 9, Color3.fromRGB(200, 215, 230))
-pillar(decorations, Vector3.new(sinkX, FLOOR + 10, HALF - 1.5), 4, 1.2, METAL).Material = Enum.Material.Metal
-part({
-	Name = "Faucet",
-	Size = Vector3.new(1, 1, 3.5),
-	CFrame = CFrame.new(sinkX, FLOOR + 13.5, HALF - 3),
-	Color = METAL,
-	Material = Enum.Material.Metal,
-	Parent = decorations,
-})
-part({
-	Name = "MirrorFrame",
-	Size = Vector3.new(30, 20, 0.3),
-	CFrame = CFrame.new(sinkX, FLOOR + 23, HALF - 0.15),
-	Color = METAL,
-	Material = Enum.Material.Metal,
-	Parent = decorations,
-})
-part({
-	Name = "Mirror",
-	Size = Vector3.new(28, 18, 0.3),
-	CFrame = CFrame.new(sinkX, FLOOR + 23, HALF - 0.45),
-	Color = Color3.fromRGB(190, 225, 255),
-	Material = Enum.Material.Glass,
-	Reflectance = 0.5,
-	Parent = decorations,
-})
-
--- A giant toothbrush lying on the floor.
-local brushSpot = Vector3.new(-38, FLOOR, 45)
-part({
-	Name = "ToothbrushHandle",
-	Size = Vector3.new(32, 1.6, 3),
-	CFrame = CFrame.new(brushSpot + Vector3.new(0, 0.8, 0)),
-	Color = Color3.fromRGB(60, 200, 200),
-	Parent = decorations,
-})
-part({
-	Name = "Bristles",
-	Size = Vector3.new(6, 2.5, 3),
-	CFrame = CFrame.new(brushSpot + Vector3.new(12.5, 2.85, 0)),
-	Color = PORCELAIN,
-	Material = Enum.Material.Fabric,
-	Parent = decorations,
-})
-part({
-	Name = "Toothpaste",
-	Size = Vector3.new(5, 1.2, 2.4),
-	CFrame = CFrame.new(brushSpot + Vector3.new(12.5, 4.7, 0)),
-	Color = Color3.fromRGB(140, 220, 255),
-	Parent = decorations,
-})
-
--- A giant bar of soap you can jump on.
-local soap = part({
-	Name = "Soap",
-	Size = Vector3.new(10, 3, 6),
-	CFrame = CFrame.new(0, FLOOR + 1.5, 45),
-	Color = Color3.fromRGB(255, 150, 200),
-	Parent = decorations,
-})
-surfaceText(soap, Enum.NormalId.Top, "SOAP", PORCELAIN)
+local crystalLight = Instance.new("PointLight")
+crystalLight.Color = PURPLE
+crystalLight.Range = 26
+crystalLight.Brightness = 3
+crystalLight.Parent = crystal
 
 --------------------------------------------------------------------------------
--- Put it in the world and start the skibidi head bobbing
+-- Title sign (behind the sell pad, facing the spawn)
+--------------------------------------------------------------------------------
+
+local titleArea = group("TitleSign")
+local titleZ = -88
+-- Tall enough to see over the SELL arch from the spawn.
+for _, side in { -1, 1 } do
+	block(titleArea, CFrame.new(side * 27, FLOOR + 19, titleZ), Vector3.new(2.2, 38, 2.2), WOOD_DARK, Enum.Material.Wood)
+end
+for _, y in { 23.4, 36.6 } do
+	block(titleArea, CFrame.new(0, FLOOR + y, titleZ), Vector3.new(58, 1.2, 2.2), WOOD_DARK, Enum.Material.Wood)
+end
+local titleBoard = block(titleArea, CFrame.new(0, FLOOR + 30, titleZ), Vector3.new(52, 12, 1.5), Color3.fromRGB(90, 60, 35), Enum.Material.WoodPlanks)
+surfaceText(titleBoard, Enum.NormalId.Back, "🚽 SKIBIDI SIMULATOR 🚽", GOLD)
+
+--------------------------------------------------------------------------------
+-- Pond with lily pads and benches (behind the spawn)
+--------------------------------------------------------------------------------
+
+local pondArea = group("Pond")
+local pondCenter = Vector3.new(0, FLOOR, 62)
+local pondRadius = 17
+
+local water = pillar(pondArea, pondCenter - Vector3.new(0, 0.3, 0), 0.4, pondRadius * 2, WATER, Enum.Material.Glass)
+water.Name = "Water"
+water.Transparency = 0.1
+water.Reflectance = 0.25
+
+-- Rocks around the edge, leaving a gap where the path arrives.
+local rockCount = 26
+for i = 1, rockCount do
+	local angle = (i / rockCount) * math.pi * 2
+	local spot = pondCenter + Vector3.new(math.cos(angle) * (pondRadius + 0.5), 0.4, math.sin(angle) * (pondRadius + 0.5))
+	if math.abs(spot.X) < 5 and spot.Z < pondCenter.Z then
+		continue
+	end
+	local gray = rng:NextInteger(125, 165)
+	block(
+		pondArea,
+		CFrame.new(spot) * CFrame.Angles(rng:NextNumber(-0.2, 0.2), rng:NextNumber(0, math.pi), rng:NextNumber(-0.2, 0.2)),
+		Vector3.new(rng:NextNumber(2.5, 4), rng:NextNumber(1, 1.8), rng:NextNumber(2, 3)),
+		Color3.fromRGB(gray, gray, gray + 5),
+		Enum.Material.Slate
+	)
+end
+
+-- Lily pads, a few with pink flowers.
+for i = 1, 6 do
+	local angle = rng:NextNumber(0, math.pi * 2)
+	local distance = rng:NextNumber(3, pondRadius - 4)
+	local spot = pondCenter + Vector3.new(math.cos(angle) * distance, 0.1, math.sin(angle) * distance)
+	pillar(pondArea, spot, 0.12, rng:NextNumber(2.5, 3.5), Color3.fromRGB(70, 160, 70))
+	if i % 2 == 0 then
+		ball(pondArea, spot + Vector3.new(0, 0.4, 0), 0.9, Color3.fromRGB(255, 150, 200))
+	end
+end
+
+-- Wooden benches looking at the pond.
+local function bench(spot: Vector3, lookAt: Vector3)
+	local base = CFrame.lookAt(spot, Vector3.new(lookAt.X, spot.Y, lookAt.Z))
+	block(pondArea, base * CFrame.new(0, 1.6, 0), Vector3.new(6, 0.4, 2), WOOD, Enum.Material.WoodPlanks)
+	block(pondArea, base * CFrame.new(0, 2.9, 0.9), Vector3.new(6, 2, 0.3), WOOD, Enum.Material.WoodPlanks)
+	for _, x in { -2.6, 2.6 } do
+		for _, z in { -0.7, 0.7 } do
+			block(pondArea, base * CFrame.new(x, 0.7, z), Vector3.new(0.4, 1.4, 0.4), WOOD_DARK, Enum.Material.Wood)
+		end
+	end
+end
+bench(pondCenter + Vector3.new(-24, 0, 0), pondCenter)
+bench(pondCenter + Vector3.new(24, 0, 0), pondCenter)
+
+--------------------------------------------------------------------------------
+-- Lamp posts along the paths
+--------------------------------------------------------------------------------
+
+local lamps = group("Lamps")
+for _, spot in {
+	Vector3.new(-7, 0, -28),
+	Vector3.new(7, 0, -28),
+	Vector3.new(-7, 0, 30),
+	Vector3.new(7, 0, 30),
+	Vector3.new(-34, 0, -7),
+	Vector3.new(-34, 0, 7),
+	Vector3.new(34, 0, -7),
+	Vector3.new(34, 0, 7),
+} do
+	local bottom = spot + Vector3.new(0, FLOOR, 0)
+	pillar(lamps, bottom, 9, 0.5, Color3.fromRGB(40, 40, 45), Enum.Material.Metal)
+	local lantern = block(lamps, CFrame.new(bottom + Vector3.new(0, 9.9, 0)), Vector3.new(1.4, 1.8, 1.4), LAMP_GLOW, Enum.Material.Neon)
+	block(lamps, CFrame.new(bottom + Vector3.new(0, 11, 0)), Vector3.new(1.9, 0.4, 1.9), Color3.fromRGB(40, 40, 45), Enum.Material.Metal)
+
+	local light = Instance.new("PointLight")
+	light.Color = LAMP_GLOW
+	light.Range = 18
+	light.Brightness = 1.2
+	light.Parent = lantern
+end
+
+--------------------------------------------------------------------------------
+-- Trees, bushes, flowers and rocks
+--------------------------------------------------------------------------------
+
+local nature = group("Nature")
+
+-- Areas to keep clear so nothing grows on the buildings or paths.
+local clearings = {
+	{ center = Vector3.new(0, 0, 0), radius = 26 }, -- plaza
+	{ center = sellCenter, radius = 20 },
+	{ center = Vector3.new(-58, 0, 0), radius = 24 }, -- shop
+	{ center = shrineCenter, radius = 17 },
+	{ center = Vector3.new(0, 0, titleZ), radius = 30 },
+	{ center = pondCenter, radius = pondRadius + 4 },
+}
+
+local function isClear(spot: Vector3, margin: number): boolean
+	local flat = Vector3.new(spot.X, 0, spot.Z)
+	for _, clearing in clearings do
+		local center = Vector3.new(clearing.center.X, 0, clearing.center.Z)
+		if (flat - center).Magnitude < clearing.radius + margin then
+			return false
+		end
+	end
+	local onPathToSellOrPond = math.abs(flat.X) < 7 + margin and flat.Z > -40 and flat.Z < 46
+	local onPathToShopOrShrine = math.abs(flat.Z) < 7 + margin and flat.X > -48 and flat.X < 48
+	return not (onPathToSellOrPond or onPathToShopOrShrine)
+end
+
+-- Finds a random clear spot between two distances from the middle.
+local function randomSpot(minDistance: number, maxDistance: number, margin: number): Vector3?
+	for _ = 1, 50 do
+		local angle = rng:NextNumber(0, math.pi * 2)
+		local distance = rng:NextNumber(minDistance, maxDistance)
+		local spot = Vector3.new(math.cos(angle) * distance, FLOOR, math.sin(angle) * distance)
+		if isClear(spot, margin) then
+			return spot
+		end
+	end
+	return nil
+end
+
+local function tree(spot: Vector3, height: number)
+	local model = Instance.new("Model")
+	model.Name = "Tree"
+	model.Parent = nature
+
+	local trunkHeight = height * 0.5
+	pillar(model, spot - Vector3.new(0, 0.5, 0), trunkHeight + 0.5, height * 0.12, Color3.fromRGB(110, 75, 45), Enum.Material.Wood)
+
+	local leafSize = height * 0.45
+	local leafColor = pick(LEAF_COLORS)
+	for _, leaf in {
+		{ offset = Vector3.new(0, 0.35, 0), size = 1 },
+		{ offset = Vector3.new(0.35, 0.1, 0.2), size = 0.8 },
+		{ offset = Vector3.new(-0.3, 0.15, -0.25), size = 0.8 },
+		{ offset = Vector3.new(0.05, 0.75, -0.05), size = 0.7 },
+	} do
+		local center = spot + Vector3.new(0, trunkHeight, 0) + leaf.offset * leafSize
+		ball(model, center, leafSize * leaf.size, leafColor:Lerp(Color3.new(0, 0, 0), rng:NextNumber(0, 0.12)), Enum.Material.Grass)
+	end
+
+	-- Trees block this spot for other trees.
+	table.insert(clearings, { center = spot, radius = 7 })
+end
+
+local function bush(spot: Vector3, size: number)
+	local color = pick(LEAF_COLORS):Lerp(Color3.new(0, 0, 0), 0.15)
+	ball(nature, spot + Vector3.new(0, size * 0.25, 0), size, color, Enum.Material.Grass)
+	ball(nature, spot + Vector3.new(size * 0.35, size * 0.15, size * 0.2), size * 0.7, color, Enum.Material.Grass)
+end
+
+-- A ring of trees around the play area, then a few closer in.
+for _ = 1, 40 do
+	local spot = randomSpot(75, 150, 6)
+	if spot then
+		tree(spot, rng:NextNumber(16, 28))
+	end
+end
+for _ = 1, 12 do
+	local spot = randomSpot(35, 75, 6)
+	if spot then
+		tree(spot, rng:NextNumber(14, 20))
+	end
+end
+
+-- Bushes around the buildings and signs.
+for _, spot in {
+	Vector3.new(-73, 0, -6),
+	Vector3.new(-73, 0, 6),
+	Vector3.new(-64, 0, -15),
+	Vector3.new(-54, 0, -15),
+	Vector3.new(-64, 0, 15),
+	Vector3.new(-31, 0, titleZ),
+	Vector3.new(31, 0, titleZ),
+	Vector3.new(-22, 0, titleZ - 2),
+	Vector3.new(22, 0, titleZ - 2),
+	Vector3.new(70, 0, 13),
+	Vector3.new(70, 0, -13),
+	Vector3.new(78, 0, 0),
+	Vector3.new(50, 0, 13),
+	Vector3.new(50, 0, -13),
+} do
+	bush(spot + Vector3.new(0, FLOOR, 0), rng:NextNumber(3.5, 5))
+end
+
+-- Little patches of flowers in the grass.
+local flowers = Instance.new("Model")
+flowers.Name = "Flowers"
+flowers.Parent = nature
+for _ = 1, 20 do
+	local patch = randomSpot(24, 80, 1)
+	if patch then
+		for _ = 1, rng:NextInteger(3, 6) do
+			local spot = patch + Vector3.new(rng:NextNumber(-2.5, 2.5), 0, rng:NextNumber(-2.5, 2.5))
+			local stemHeight = rng:NextNumber(0.8, 1.4)
+			block(flowers, CFrame.new(spot + Vector3.new(0, stemHeight / 2, 0)), Vector3.new(0.2, stemHeight, 0.2), Color3.fromRGB(60, 140, 50))
+			ball(flowers, spot + Vector3.new(0, stemHeight + 0.3, 0), 0.9, pick(FLOWER_COLORS))
+		end
+	end
+end
+
+-- A few boulders.
+for _ = 1, 8 do
+	local spot = randomSpot(40, 130, 3)
+	if spot then
+		local size = rng:NextNumber(3, 6)
+		block(
+			nature,
+			CFrame.new(spot + Vector3.new(0, size * 0.3, 0)) * CFrame.Angles(rng:NextNumber(0, 1), rng:NextNumber(0, 3), rng:NextNumber(0, 1)),
+			Vector3.new(size, size * 0.8, size * 0.9),
+			STONE,
+			Enum.Material.Slate
+		)
+	end
+end
+
+--------------------------------------------------------------------------------
+-- Put it in the world and start the crystal moving
 --------------------------------------------------------------------------------
 
 map.Parent = workspace
 
-for _, toilet in bobbingHeads do
-	local head = toilet.head
-	local up = head.CFrame * CFrame.new(0, 0.5 * toilet.scale, 0) * CFrame.Angles(0, math.rad(25), 0)
-	local bob = TweenService:Create(
-		head,
-		TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
-		{ CFrame = up }
-	)
-	-- Start each head at a slightly different time so they don't all move together.
-	task.delay(math.random() * 1.5, function()
-		bob:Play()
-	end)
-end
+-- Bob up and down.
+TweenService:Create(
+	crystalAnchor,
+	TweenInfo.new(2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+	{ CFrame = crystalAnchor.CFrame + Vector3.new(0, 1.5, 0) }
+):Play()
+
+-- Spin. A cube standing on its corner looks the same every third of a turn,
+-- so repeating a 120-degree turn forever looks like one smooth spin.
+TweenService:Create(
+	crystalWeld,
+	TweenInfo.new(3, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1),
+	{ C0 = CFrame.Angles(0, math.pi * 2 / 3, 0) * cornerUp }
+):Play()

@@ -16,7 +16,7 @@ Progress saves automatically.
 | `src/shared/Config.luau` | All the game's numbers: prices, upgrades, rebirth cost | **ModuleScript** named `Config` in `ReplicatedStorage > Shared` |
 | `src/shared/Format.luau` | Turns `1500` into `1.5K` | **ModuleScript** named `Format` in `ReplicatedStorage > Shared` |
 | `src/server/GameServer.server.luau` | Saving, clicking, selling, shop, rebirths | **Script** named `GameServer` in `ServerScriptService` |
-| `src/server/MapBuilder.server.luau` | Builds the bathroom map | **Script** named `MapBuilder` in `ServerScriptService` |
+| `src/server/MapBuilder.server.luau` | Builds the map | **Script** named `MapBuilder` in `ServerScriptService` |
 | `src/client/GameClient.client.luau` | The on-screen UI | **LocalScript** named `GameClient` in `StarterPlayer > StarterPlayerScripts` |
 
 The scripts build everything else themselves: the plunger tool, the map and all the UI.
@@ -57,8 +57,8 @@ Without these, the game still works, it just won't remember progress.
 ## Customizing
 
 - **Prices, upgrades, rebirths:** edit `src/shared/Config.luau`. To add a new plunger or tank, add a line to the list and the shop shows it automatically.
-- **The map:** MapBuilder builds a giant bathroom each time the game starts: a sell drain in front of spawn, the Plunger Shop on the left, the Rebirth toilet on the right, plus bobbing skibidi toilets, toilet paper towers, a bathtub, a sink and more. Walk up to the shop counter or the rebirth toilet and press **E** to open that menu.
-- **Editing the map by hand:** press **Play**, find `Map` in Workspace in the Explorer, right-click it and choose **Copy**. Press **Stop**, then right-click **Workspace** and choose **Paste Into**. Now the map is saved in your place and you can move things around. MapBuilder skips building when a `Map` is already there.
+- **The map:** MapBuilder builds a sunny grass field each time the game starts: a stone plaza at spawn, the SELL pad (with its sign on an arch above it) in front, the Plunger Shop on the left, the Rebirth shrine with a floating crystal on the right, and a pond behind. Trees, flowers, bushes, lamp posts and grassy hills fill in the rest. Walk up to the shop counter or the rebirth altar and press **E** to open that menu.
+- **Editing the map by hand:** press **Play**, find `Map` in Workspace in the Explorer, right-click it and choose **Copy**. Press **Stop**, then right-click **Workspace** and choose **Paste Into**. Now the map is saved in your place and you can move things around. MapBuilder skips building when a `Map` is already there. (The hills are Terrain, which MapBuilder only adds when the place has no Terrain yet.)
 - **Sell pad:** GameServer sells Flushes when a player touches any part named `SellPad`. The map has one; without the map, a plain green pad appears in front of spawn.
 - **Starting over:** change `Config.DataStoreName` to wipe everyone's progress (handy while testing).
 
