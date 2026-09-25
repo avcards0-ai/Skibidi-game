@@ -39,6 +39,19 @@ The names matter: the scripts look for `Shared`, `Config` and `Format` by name.
 
 If something is set up wrong, a red **SETUP PROBLEM** message appears on screen when you press Play and tells you what to fix.
 
+### Option C: the Update Game button (easiest for updates)
+
+`tools/SkibidiUpdater.luau` is a Studio plugin that adds an **Update Game** button to the **Plugins** tab. Clicking it downloads the newest scripts from this repo and puts each one in the right place with the right name. It also fixes mistakes like a lowercase `shared` folder or a LocalScript where a Script should be. You can undo an update with **Ctrl+Z**.
+
+Install it once:
+
+1. In Studio, insert a **Script** anywhere (ServerStorage is fine) and paste in the code from `tools/SkibidiUpdater.luau`.
+2. Right-click the Script → **Save as Local Plugin...** → **Save**.
+3. Delete that Script.
+4. Open the **Plugins** tab and click **Update Game**. The first time, Studio asks whether the plugin can access the internet. Click **Allow**.
+
+After that, whenever the code on GitHub changes, stop the game and click **Update Game**.
+
 ### Option B: Rojo (syncs these files into Studio automatically)
 
 1. Install [Rojo](https://rojo.space/docs/v7/getting-started/installation/): the Studio plugin, plus the command-line tool or the VS Code extension.
