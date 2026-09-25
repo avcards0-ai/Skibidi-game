@@ -1,0 +1,4 @@
+# Roblox Studio lock files and Rojo's generated sourcemap
+*.rbxl.lock
+*.rbxlx.lock
+sourcemap.json
