@@ -743,6 +743,7 @@ local function buildEggModel(color: Color3): Part
 	local egg = Instance.new("Part")
 	egg.Size = Vector3.new(3, 3.9, 3)
 	egg.Color = color
+	egg.Material = Enum.Material.Neon
 	egg.Anchored = true
 	local mesh = Instance.new("SpecialMesh")
 	mesh.MeshType = Enum.MeshType.Sphere -- stretches to the part's size, making an egg shape

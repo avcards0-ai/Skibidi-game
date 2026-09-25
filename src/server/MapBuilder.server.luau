@@ -311,17 +311,6 @@ local function actionPrompt(target: BasePart, actionText: string, objectText: st
 	prompt.Parent = target
 end
 
--- Sticks `attached` to `base` so it moves along with it.
-local function weld(base: BasePart, attached: BasePart)
-	attached.Anchored = false
-	attached.CanCollide = false
-	local joint = Instance.new("Weld")
-	joint.Part0 = base
-	joint.Part1 = attached
-	joint.C0 = base.CFrame:ToObjectSpace(attached.CFrame)
-	joint.Parent = attached
-end
-
 local function addLight(target: BasePart, color: Color3, range: number, brightness: number)
 	local light = Instance.new("PointLight")
 	light.Color = color
@@ -1035,25 +1024,20 @@ for i, egg in Config.Eggs do
 	stand.Name = egg.Name .. " Stand"
 	block(hatchery, spot * CFrame.new(0, 3.2, 0), Vector3.new(5.4, 0.4, 5.4), egg.Color, Enum.Material.Neon)
 
-	-- A sphere mesh stretches to fill the part, so a tall part makes an egg shape.
+	-- A plain egg that glows its color. A sphere mesh stretches to fill the part,
+	-- so a tall part makes an egg shape.
 	local eggPart = part({
 		Name = egg.Name,
 		Size = Vector3.new(3.4, 4.4, 3.4),
 		CFrame = spot * CFrame.new(0, 5.6, 0),
 		Color = egg.Color,
+		Material = Enum.Material.Neon,
 		Parent = hatchery,
 	})
 	local mesh = Instance.new("SpecialMesh")
 	mesh.MeshType = Enum.MeshType.Sphere
 	mesh.Parent = eggPart
-
-	-- Spots on the shell, welded on so they bob with the egg.
-	for dot = 1, 6 do
-		local around = (dot / 6) * TAU + rng:NextNumber(-0.3, 0.3)
-		local up = rng:NextNumber(-0.5, 0.7)
-		local onShell = Vector3.new(math.cos(around) * math.cos(up) * 1.7, math.sin(up) * 2.2, math.sin(around) * math.cos(up) * 1.7)
-		weld(eggPart, decor(ball(hatchery, (eggPart.CFrame * CFrame.new(onShell)).Position, 0.7, egg.Color:Lerp(WHITE, 0.55))))
-	end
+	addLight(eggPart, egg.Color, 14, 2)
 
 	actionPrompt(stand, "Hatch", ("%s (%s coins)"):format(egg.Name, Format.number(egg.Price)), "Egg", egg.Name)
 	floatingLabel(stand, ("%s\n💰 %s"):format(egg.Name, Format.number(egg.Price)), egg.Color:Lerp(WHITE, 0.3), 9.5)
