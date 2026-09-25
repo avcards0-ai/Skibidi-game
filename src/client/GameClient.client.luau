@@ -1,6 +1,7 @@
--- Client UI for the simulator: the coin and Flush counters, the shop, the rebirth
--- menu and pop-up messages. The server owns all the numbers; this script only
--- shows them and asks the server when the player wants to buy something.
+-- Client side of the simulator: the coin and Flush counters, the shop, the rebirth
+-- menu, pop-up messages, sounds, the plunger animation and the glowing guide to
+-- the sell pad. The server owns all the numbers; this script only shows them and
+-- asks the server when the player wants to buy something.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -111,6 +112,12 @@ local function withDefaults(defaults: { [string]: any }, props: { [string]: any 
 	return merged
 end
 
+local function tween(instance: Instance, seconds: number, goal: { [string]: any }, style: Enum.EasingStyle?): Tween
+	local newTween = TweenService:Create(instance, TweenInfo.new(seconds, style or Enum.EasingStyle.Quad, Enum.EasingDirection.Out), goal)
+	newTween:Play()
+	return newTween
+end
+
 local function rounded(radius: number?)
 	return make("UICorner", { CornerRadius = UDim.new(0, radius or 12) })
 end
@@ -136,8 +143,9 @@ local function textLabel(props: { [string]: any })
 	)
 end
 
+-- A rounded button that grows a little when you hover over it and squishes when pressed.
 local function button(text: string, color: Color3, props: { [string]: any })
-	return make(
+	local newButton = make(
 		"TextButton",
 		withDefaults({
 			BackgroundColor3 = color,
@@ -158,6 +166,20 @@ local function button(text: string, color: Color3, props: { [string]: any })
 			}),
 		}
 	)
+	local scale = make("UIScale", { Parent = newButton })
+	newButton.MouseEnter:Connect(function()
+		tween(scale, 0.12, { Scale = 1.05 })
+	end)
+	newButton.MouseLeave:Connect(function()
+		tween(scale, 0.12, { Scale = 1 })
+	end)
+	newButton.MouseButton1Down:Connect(function()
+		tween(scale, 0.08, { Scale = 0.92 })
+	end)
+	newButton.MouseButton1Up:Connect(function()
+		tween(scale, 0.25, { Scale = 1 }, Enum.EasingStyle.Back)
+	end)
+	return newButton
 end
 
 local gui = make("ScreenGui", {
@@ -167,6 +189,22 @@ local gui = make("ScreenGui", {
 	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 	Parent = player:WaitForChild("PlayerGui"),
 })
+
+-- Sounds built into Roblox, so nothing needs uploading.
+local SPLASH_SOUND = "rbxasset://sounds/impact_water.mp3"
+local PING_SOUND = "rbxasset://sounds/electronicpingshort.wav"
+
+local function playSound(soundId: string, volume: number, speed: number?)
+	local sound = Instance.new("Sound")
+	sound.SoundId = soundId
+	sound.Volume = volume
+	sound.PlaybackSpeed = speed or 1
+	sound.Parent = gui
+	sound:Play()
+	task.delay(3, function()
+		sound:Destroy()
+	end)
+end
 
 --------------------------------------------------------------------------------
 -- Messages and "+5" pop-ups
@@ -190,6 +228,9 @@ local function showNotice(message: string, success: boolean)
 	notice.TextColor3 = if success then GREEN else RED
 	notice.TextTransparency = 0
 	notice.TextStrokeTransparency = 0.3
+	if success then
+		playSound(PING_SOUND, 0.4)
+	end
 
 	task.delay(2.5, function()
 		if thisNotice == noticeCount then -- a newer message hasn't replaced this one
@@ -270,7 +311,9 @@ local function statBox(color: Color3, order: number)
 		LayoutOrder = order,
 		Size = UDim2.new(1, 0, 0, 44),
 		Parent = sidebar,
-	}, { rounded(), border(color, 2) })
+	}, { rounded() })
+	local outline = border(color, 2)
+	outline.Parent = box
 
 	local fill = make("Frame", {
 		BackgroundColor3 = color,
@@ -286,10 +329,10 @@ local function statBox(color: Color3, order: number)
 		ZIndex = 2,
 		Parent = box,
 	})
-	return text, fill
+	return text, fill, outline
 end
 
-local coinsText = statBox(GOLD, 1)
+local coinsText, _, coinsOutline = statBox(GOLD, 1)
 local flushText, flushFill = statBox(BLUE, 2)
 local rebirthsText = statBox(PURPLE, 3)
 
@@ -301,6 +344,7 @@ local rebirthButton = button("⭐ Rebirth", PURPLE, { LayoutOrder = 5, Size = UD
 --------------------------------------------------------------------------------
 
 local windows = {}
+local windowScales = {}
 
 local function makeWindow(title: string, color: Color3, maxSize: Vector2)
 	local window = make("Frame", {
@@ -337,21 +381,29 @@ local function makeWindow(title: string, color: Color3, maxSize: Vector2)
 	end)
 
 	table.insert(windows, window)
+	windowScales[window] = make("UIScale", { Parent = window })
 	return window
 end
 
--- Opens a window (closing any other one), or closes it if it's already open.
-local function toggleWindow(window: Frame)
-	local open = not window.Visible
+-- Shows a window with a little pop, closing any other one.
+local function openWindow(window: Frame)
+	if window.Visible then
+		return
+	end
 	for _, other in windows do
 		other.Visible = false
 	end
-	window.Visible = open
+	window.Visible = true
+	windowScales[window].Scale = 0.85
+	tween(windowScales[window], 0.25, { Scale = 1 }, Enum.EasingStyle.Back)
 end
 
-local function openWindow(window: Frame)
-	for _, other in windows do
-		other.Visible = other == window
+-- Opens a window, or closes it if it's already open.
+local function toggleWindow(window: Frame)
+	if window.Visible then
+		window.Visible = false
+	else
+		openWindow(window)
 	end
 end
 
@@ -528,17 +580,77 @@ end
 -- Keeping everything up to date
 --------------------------------------------------------------------------------
 
+-- A glowing line from you to the sell pad while your tank is full.
+local sellGuide: Beam? = nil
+local padAttachment: Attachment? = nil
+local function updateSellGuide(show: boolean)
+	local guide = sellGuide
+	if not show then
+		if guide then
+			guide.Enabled = false
+		end
+		return
+	end
+
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	-- Searching the whole map is slow, so reuse the pad we found last time.
+	local target = padAttachment
+	local pad = if target and target.Parent then target.Parent else workspace:FindFirstChild("SellPad", true)
+	if not (root and pad and pad:IsA("BasePart")) then
+		return
+	end
+
+	if not target or target.Parent ~= pad then
+		target = Instance.new("Attachment")
+		target.Name = "SellGuideTarget"
+		target.Parent = pad
+		target.WorldPosition = pad.Position + Vector3.new(0, 1, 0)
+		padAttachment = target
+	end
+
+	if not guide or guide.Parent ~= root then
+		local start = Instance.new("Attachment")
+		start.Name = "SellGuideStart"
+		start.Parent = root
+
+		guide = Instance.new("Beam")
+		guide.Attachment0 = start
+		guide.Color = ColorSequence.new(Color3.fromRGB(90, 255, 120))
+		guide.Transparency = NumberSequence.new(0.2, 0.6)
+		guide.Width0 = 0.6
+		guide.Width1 = 0.6
+		guide.FaceCamera = true
+		guide.LightEmission = 1
+		guide.Parent = root
+		sellGuide = guide
+	end
+	guide.Attachment1 = target
+	guide.Enabled = true
+end
+
+local lastCoins = stat("Coins")
 local function refreshSidebar()
 	local flushes, capacity = stat("Flushes"), stat("Capacity")
 	local full = capacity > 0 and flushes >= capacity
+	local coins = stat("Coins")
 
-	coinsText.Text = "💰 " .. Format.number(stat("Coins"))
+	-- Flash the coin box when you earn coins.
+	if player:GetAttribute("Loaded") and coins > lastCoins then
+		coinsOutline.Thickness = 6
+		coinsOutline.Color = Color3.new(1, 1, 1)
+		tween(coinsOutline, 0.5, { Thickness = 2, Color = GOLD })
+	end
+	lastCoins = coins
+
+	coinsText.Text = "💰 " .. Format.number(coins)
 	rebirthsText.Text = ("⭐ %s Rebirths (%gx)"):format(Format.number(stat("Rebirths")), Config.getMultiplier(stat("Rebirths")))
 	flushText.Text = if full
 		then "🚽 FULL! Go sell"
 		else ("🚽 %s / %s"):format(Format.number(flushes), Format.number(capacity))
-	flushFill.Size = UDim2.fromScale(if capacity > 0 then math.clamp(flushes / capacity, 0, 1) else 0, 1)
+	tween(flushFill, 0.15, { Size = UDim2.fromScale(if capacity > 0 then math.clamp(flushes / capacity, 0, 1) else 0, 1) })
 	flushFill.BackgroundColor3 = if full then RED else BLUE
+	updateSellGuide(full and player:GetAttribute("Loaded") == true)
 end
 
 local function refreshAll()
@@ -554,6 +666,7 @@ player.AttributeChanged:Connect(function(name)
 		-- "Loaded" check skips the pop-up when your saved Flushes first arrive.
 		if player:GetAttribute("Loaded") and flushes > lastFlushes then
 			showGainPopup(flushes - lastFlushes)
+			playSound(SPLASH_SOUND, 0.35, 1.1 + math.random() * 0.4)
 		end
 		lastFlushes = flushes
 	end
@@ -578,6 +691,44 @@ ProximityPromptService.PromptTriggered:Connect(function(prompt)
 		openWindow(window)
 	end
 end)
+
+-- Push the plunger down and back up on every click (only you see this).
+local hookedPlungers = setmetatable({}, { __mode = "k" })
+local function hookPlunger(tool: Instance)
+	if not (tool:IsA("Tool") and tool.Name == "Plunger") or hookedPlungers[tool] then
+		return
+	end
+	hookedPlungers[tool] = true
+	local rest = tool.Grip
+	local plunging: Tween? = nil
+	tool.Activated:Connect(function()
+		if plunging then
+			plunging:Cancel()
+		end
+		tool.Grip = rest
+		local push = TweenService:Create(
+			tool,
+			TweenInfo.new(0.07, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, true),
+			{ Grip = rest * CFrame.new(0, 0.9, 0) }
+		)
+		plunging = push
+		push:Play()
+	end)
+end
+
+local function onCharacterAdded(character: Model)
+	for _, child in character:GetChildren() do
+		hookPlunger(child)
+	end
+	character.ChildAdded:Connect(hookPlunger)
+	-- The guide line is attached to your body, so rebuild it after respawning.
+	character:WaitForChild("HumanoidRootPart")
+	refreshSidebar()
+end
+player.CharacterAdded:Connect(onCharacterAdded)
+if player.Character then
+	task.spawn(onCharacterAdded, player.Character)
+end
 
 -- A quick hint once the player's data has loaded.
 task.spawn(function()
