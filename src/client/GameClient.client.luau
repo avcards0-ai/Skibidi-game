@@ -7,16 +7,62 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
-local Shared = ReplicatedStorage:WaitForChild("Shared")
-local Config = require(Shared:WaitForChild("Config"))
-local Format = require(Shared:WaitForChild("Format"))
+local player = Players.LocalPlayer
 
-local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+print("Skibidi Simulator: GameClient is running")
+
+-- If the game is set up wrong in Studio, show what to fix in big red text on
+-- the screen (the Output window is easy to miss), then stop this script.
+local function showSetupProblem(message: string): never
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "SetupProblemClient"
+	gui.ResetOnSpawn = false
+
+	local label = Instance.new("TextLabel")
+	label.AnchorPoint = Vector2.new(0.5, 0)
+	label.Position = UDim2.new(0.5, 0, 0, 210) -- below the server's message, if there is one
+	label.Size = UDim2.new(0.8, 0, 0, 120)
+	label.BackgroundColor3 = Color3.fromRGB(200, 40, 40)
+	label.Font = Enum.Font.FredokaOne
+	label.Text = "SETUP PROBLEM (client)\n" .. message
+	label.TextColor3 = Color3.new(1, 1, 1)
+	label.TextScaled = true
+	label.Parent = gui
+
+	gui.Parent = player:WaitForChild("PlayerGui")
+	error("SETUP PROBLEM: " .. message, 0)
+end
+
+-- Loads a ModuleScript from ReplicatedStorage > Shared, with a clear message if it's missing or broken.
+local function requireShared(name: string)
+	local shared = ReplicatedStorage:WaitForChild("Shared", 5)
+	if not shared then
+		showSetupProblem('Can\'t find a Folder named "Shared" inside ReplicatedStorage.')
+	end
+	local module = shared:WaitForChild(name, 5)
+	if not (module and module:IsA("ModuleScript")) then
+		showSetupProblem(('Can\'t find a ModuleScript named "%s" inside ReplicatedStorage > Shared.'):format(name))
+	end
+	local ok, result = pcall(require, module)
+	if not ok then
+		showSetupProblem(('The "%s" ModuleScript has an error. Delete its code and paste it in again.'):format(name))
+	end
+	return result
+end
+
+local Config = requireShared("Config")
+local Format = requireShared("Format")
+
+-- The server makes the Remotes folder, so if it never shows up, GameServer isn't running.
+local Remotes = ReplicatedStorage:WaitForChild("Remotes", 10)
+if not Remotes then
+	showSetupProblem(
+		'GameServer isn\'t running. It must be a Script (not a LocalScript) inside ServerScriptService, with all of its code pasted in.'
+	)
+end
 local buyRemote = Remotes:WaitForChild("BuyItem")
 local rebirthRemote = Remotes:WaitForChild("Rebirth")
 local notifyRemote = Remotes:WaitForChild("Notify")
-
-local player = Players.LocalPlayer
 
 local FONT = Enum.Font.FredokaOne
 local WHITE = Color3.new(1, 1, 1)

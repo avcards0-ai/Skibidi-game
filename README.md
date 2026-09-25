@@ -33,6 +33,10 @@ The scripts build everything else themselves: the plunger tool, the sell pad and
 
 The names matter: the scripts look for `Shared`, `Config` and `Format` by name.
 
+**Copying tip:** on GitHub, open a file and click **Raw**. Then press **Ctrl+A** and **Ctrl+C** to copy the whole thing. In Studio, delete the starter code in the script and press **Ctrl+V**.
+
+If something is set up wrong, a red **SETUP PROBLEM** message appears on screen when you press Play and tells you what to fix.
+
 ### Option B: Rojo (syncs these files into Studio automatically)
 
 1. Install [Rojo](https://rojo.space/docs/v7/getting-started/installation/): the Studio plugin, plus the command-line tool or the VS Code extension.
@@ -51,7 +55,7 @@ Without these, the game still works, it just won't remember progress.
 ## Customizing
 
 - **Prices, upgrades, rebirths:** edit `src/shared/Config.luau`. To add a new plunger or tank, add a line to the list and the shop shows it automatically.
-- **Sell pad:** by default a green pad appears 30 studs in front of spawn. To use your own, put a Part named `SellPad` in Workspace and the script uses that instead.
+- **Sell pad:** by default a green pad appears 25 studs in front of spawn. To use your own, put a Part named `SellPad` in Workspace and the script uses that instead.
 - **Starting over:** change `Config.DataStoreName` to wipe everyone's progress (handy while testing).
 
 ## Ideas for what to add next
